@@ -723,6 +723,7 @@ class SpeedRunAdmin(EventLockedMixin, CustomModelAdmin):
         'runners_',
         'hosts_',
         'commentators_',
+        'order',
         'onsite',
         'starttime',
         'run_time',

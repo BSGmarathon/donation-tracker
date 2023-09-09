@@ -8,6 +8,7 @@ Bugs fixed:
 
 Features added:
 - Euro support
+- Re added the order column to the overview in speedruns
 
 ## Requirements
 
