@@ -1,5 +1,14 @@
 # Django Donation Tracker
 
+## About this fork
+This BSG fork fixes some bugs that are in the current version of the GDQ tracker.
+
+Bugs fixed:
+- `tracker.view_hidden_bid` permission not applied properly to the feed causing screeners to not see anything appear on their screen.
+
+Features added:
+- Euro support
+
 ## Requirements
 
 - Python 3.7 to 3.11
@@ -38,6 +47,14 @@ Docker should also work but support is still in the experimental phases.
 ### Configuration
 
 The Donation Tracker adds a few configuration options.
+
+#### PAYPAL_TEST
+
+Type: `bool`
+
+Default: `True`
+
+Controls whether or not the tracker uses paypal sandbox, `True` means that it does.
 
 #### TRACKER_HAS_CELERY (deprecated alias: HAS_CELERY)
 
