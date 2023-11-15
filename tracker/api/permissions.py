@@ -37,7 +37,7 @@ class EventLockedPermission(DjangoModelPermissionsOrAnonReadOnly):
     def has_permission(self, request: Request, view: t.Callable):
         return super().has_permission(request, view) and (
             request.method in SAFE_METHODS
-            or request.user.has_perm('tracker.edit_locked_events')
+            or request.user.has_perm('tracker.can_edit_locked_events')
             or not view.is_event_locked(request)
         )
 
