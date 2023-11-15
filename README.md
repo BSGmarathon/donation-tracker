@@ -4,7 +4,7 @@
 This BSG fork fixes some bugs that are in the current version of the GDQ tracker.
 
 Bugs fixed:
-- `tracker.view_hidden_bid` permission not applied properly to the feed causing screeners to not see anything appear on their screen.
+- Currently, none
 
 Features added:
 - Euro support
