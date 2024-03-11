@@ -12,7 +12,7 @@ from rest_framework import serializers
 from tracker.models import Interview
 from tracker.models.bid import Bid, DonationBid
 from tracker.models.donation import Donation, Donor
-from tracker.models.event import Event, Headset, Runner, SpeedRun
+from tracker.models.event import Event, Headset, Runner, SpeedRun, VideoLink
 
 log = logging.getLogger(__name__)
 
@@ -30,9 +30,9 @@ def _coalesce_validation_errors(errors):
 
 
 class WithPermissionsSerializerMixin:
-    def __init__(self, instance, *, with_permissions=(), **kwargs):
+    def __init__(self, *args, with_permissions=(), **kwargs):
         self.permissions = tuple(with_permissions)
-        super().__init__(instance, **kwargs)
+        super().__init__(*args, **kwargs)
 
 
 class TrackerModelSerializer(serializers.ModelSerializer):
@@ -314,7 +314,9 @@ class EventSerializer(serializers.ModelSerializer):
         return obj.amount
 
 
-class RunnerSerializer(serializers.ModelSerializer):
+class RunnerSerializer(
+    WithPermissionsSerializerMixin, EventNestedSerializerMixin, TrackerModelSerializer
+):
     type = ClassNameField()
 
     class Meta:
@@ -344,6 +346,22 @@ class HeadsetSerializer(serializers.ModelSerializer):
         )
 
 
+class VideoLinkSerializer(TrackerModelSerializer):
+    class LinkTypeSerializer(TrackerModelSerializer):
+        def to_representation(self, instance):
+            return instance.name
+
+    link_type = LinkTypeSerializer()
+
+    class Meta:
+        model = VideoLink
+        fields = (
+            'id',
+            'link_type',
+            'url',
+        )
+
+
 class SpeedRunSerializer(
     WithPermissionsSerializerMixin, EventNestedSerializerMixin, TrackerModelSerializer
 ):
@@ -352,6 +370,7 @@ class SpeedRunSerializer(
     runners = RunnerSerializer(many=True)
     hosts = HeadsetSerializer(many=True)
     commentators = HeadsetSerializer(many=True)
+    video_links = VideoLinkSerializer(many=True)
 
     class Meta:
         model = SpeedRun
@@ -361,9 +380,13 @@ class SpeedRunSerializer(
             'event',
             'name',
             'display_name',
+            'twitch_name',
             'description',
             'category',
+            'coop',
+            'onsite',
             'console',
+            'release_year',
             'runners',
             'hosts',
             'commentators',
@@ -374,6 +397,7 @@ class SpeedRunSerializer(
             'setup_time',
             'anchor_time',
             'tech_notes',
+            'video_links',
         )
 
     def __init__(self, *args, with_tech_notes=False, **kwargs):

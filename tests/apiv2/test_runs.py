@@ -4,6 +4,7 @@ from tracker.api.serializers import (
     HeadsetSerializer,
     RunnerSerializer,
     SpeedRunSerializer,
+    VideoLinkSerializer,
 )
 
 from ..test_speedrun import TestSpeedRunBase
@@ -77,18 +78,23 @@ class TestRunSerializer(TestSpeedRunBase, APITestCase):
             'id': run.id,
             'name': run.name,
             'display_name': run.display_name,
+            'twitch_name': run.twitch_name,
             'commentators': HeadsetSerializer(run.commentators, many=True).data,
             'run_time': run.run_time,
             'order': run.order,
             'hosts': HeadsetSerializer(run.hosts, many=True).data,
             'endtime': run.endtime,
             'category': run.category,
+            'coop': run.coop,
+            'onsite': run.onsite,
             'runners': RunnerSerializer(run.runners, many=True).data,
             'description': run.description,
             'console': run.console,
+            'release_year': run.release_year,
             'starttime': run.starttime,
             'anchor_time': run.anchor_time,
             'setup_time': run.setup_time,
+            'video_links': VideoLinkSerializer(run.video_links, many=True).data,
         }
         if with_event:
             data['event'] = EventSerializer(run.event).data

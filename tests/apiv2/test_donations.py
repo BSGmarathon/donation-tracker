@@ -23,6 +23,9 @@ class TestDonations(APITestCase):
         self.client = APIClient()
         self.client.force_authenticate(user=self.super_user)
         self.event = randgen.build_random_event(self.rand, num_runs=2, num_donors=2)
+        self.other_event = randgen.build_random_event(
+            self.rand, num_runs=2, num_donors=2
+        )
 
     def generate_donations(
         self,
@@ -76,6 +79,9 @@ class TestDonations(APITestCase):
     def test_unprocessed_returns_serialized_donations(self):
         donations = self.generate_donations(self.event, count=1, state='pending')
         donations.sort(key=lambda d: d.timereceived)
+
+        self.generate_donations(self.other_event, count=1, state='pending')
+
         serialized = DonationSerializer(
             donations, with_permissions=('tracker.change_donation',), many=True
         )
@@ -103,7 +109,7 @@ class TestDonations(APITestCase):
             self.event,
             count=2,
             state='pending',
-            time=date.replace(year=1),
+            time=date.replace(year=2),
         )
         new_donations = self.generate_donations(
             self.event,
@@ -147,6 +153,9 @@ class TestDonations(APITestCase):
     def test_flagged_returns_serialized_donations(self):
         donations = self.generate_donations(self.event, count=1, state='flagged')
         donations.sort(key=lambda d: d.timereceived)
+
+        self.generate_donations(self.other_event, count=1, state='flagged')
+
         serialized = DonationSerializer(
             donations, with_permissions=('tracker.change_donation',), many=True
         )
@@ -174,7 +183,7 @@ class TestDonations(APITestCase):
             self.event,
             count=2,
             state='flagged',
-            time=date.replace(year=1),
+            time=date.replace(year=2),
         )
         new_donations = self.generate_donations(
             self.event,

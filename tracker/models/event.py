@@ -776,9 +776,14 @@ class Runner(models.Model):
 
 # XXX: this signal handler will run for both SpeedRuns and Runners
 @receiver(signals.m2m_changed, sender=SpeedRun.runners.through)
-def runners_changed(sender, instance, action, **kwargs):
+def runners_changed(sender, instance, action, model, pk_set, reverse, using, **kwargs):
     if action[:4] == 'post':
-        instance.save(fix_time=False, fix_runners=True)
+        if reverse:
+            instances = model.objects.using(using).filter(pk__in=pk_set)
+        else:
+            instances = [instance]
+        for instance in instances:
+            instance.save()
 
 
 class Submission(models.Model):
@@ -867,3 +872,25 @@ class Headset(models.Model):
 
     def natural_key(self):
         return (self.name,)
+
+
+class VideoLinkType(models.Model):
+    name = models.CharField(max_length=32, unique=True)
+
+    def __str__(self):
+        return self.name
+
+
+class VideoLink(models.Model):
+    run = models.ForeignKey(
+        SpeedRun, on_delete=models.PROTECT, related_name='video_links'
+    )
+    link_type = models.ForeignKey(VideoLinkType, on_delete=models.PROTECT)
+    url = models.URLField()
+    # public = models.BooleanField(default=True) # TODO: add this once I figure out how to filter nested serializers
+
+    def __str__(self):
+        return f'{self.run} -- {self.link_type} -- {self.url}'
+
+    class Meta:
+        unique_together = ('run', 'link_type')
