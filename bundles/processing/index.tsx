@@ -30,7 +30,7 @@ window.AdminApp = function (props: any) {
 
   setCSRFToken(props.csrfToken);
   setAdminPath(props.ROOT_PATH);
-  APIClient.sockets.setSocketRoot(`${props.TRACKER_PATH}ws/`);
+  APIClient.sockets.setSocketRoot(`${props.TRACKER_PATH}/ws/`);
   setAPIRoot(props.CONSTANTS.APIV2_ROOT);
 
   const root = createRoot(document.getElementById('container')!);
