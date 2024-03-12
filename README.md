@@ -4,7 +4,7 @@
 This BSG fork fixes some bugs that are in the current version of the GDQ tracker.
 
 Bugs fixed:
-- Currently, none
+- Websocket path breaking when tracker url is `/`
 
 Features added:
 - Euro support
