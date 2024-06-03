@@ -5,6 +5,7 @@ This BSG fork fixes some bugs that are in the current version of the GDQ tracker
 
 Bugs fixed:
 - Websocket path breaking when tracker url is `/`
+- Reading donations not showing bids
 
 Features added:
 - Euro support

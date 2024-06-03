@@ -122,6 +122,7 @@ export default function ReadingDonationRow(props: DonationRowProps) {
 
   return (
     <DonationRow
+      showBids
       donation={donation}
       draggable={draggable}
       getBylineElements={getBylineElements}
