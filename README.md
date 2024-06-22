@@ -9,6 +9,7 @@ Bugs fixed:
 
 Features added:
 - Euro support
+- GBP support
 - Re added the order column to the overview in speedruns
 
 ## Requirements
