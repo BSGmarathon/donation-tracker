@@ -30,6 +30,7 @@ _currencyChoices = (
     ('USD', 'US Dollars'),
     ('CAD', 'Canadian Dollars'),
     ('EUR', 'Euros'),
+    ('GBP', 'Pound sterling'),
 )
 
 DonorVisibilityChoices = (
