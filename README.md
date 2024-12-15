@@ -11,6 +11,7 @@ Features added:
 - Euro support
 - GBP support
 - Re added the order column to the overview in speedruns
+- Added "charity_split" to allow events to not always forward 100%
 
 ## Requirements
 

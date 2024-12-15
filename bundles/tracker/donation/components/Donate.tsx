@@ -66,7 +66,7 @@ const Donate = (props: DonateProps) => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [eventId]);
 
-  const { currency, receiverName, donateUrl, minimumDonation, maximumDonation, step } = eventDetails;
+  const { currency, charity_split, receiverName, donateUrl, minimumDonation, maximumDonation, step } = eventDetails;
   const { name, email, wantsEmails, amount, comment } = donation;
 
   const updateDonation = React.useCallback(
@@ -101,7 +101,13 @@ const Donate = (props: DonateProps) => {
       <Header size={Header.Sizes.H1} marginless>
         Thank You For Your Donation
       </Header>
-      <Text size={Text.Sizes.SIZE_16}>100% of your donation goes directly to {receiverName}.</Text>
+      {charity_split < 100 ? (
+        <Text size={Text.Sizes.SIZE_16}>
+          {charity_split}% of your donation goes to {receiverName}, the rest goes to the event itself.
+        </Text>
+      ) : (
+        <Text size={Text.Sizes.SIZE_16}>100% of your donation goes directly to {receiverName}.</Text>
+      )}
 
       <section className={styles.section}>
         <ErrorAlert errors={commentErrors.requestedalias} />

@@ -39,6 +39,7 @@ export type Event = {
   use_one_step_screening: boolean;
   amount?: number;
   donation_count?: number;
+  charity_split: number;
 };
 
 export type Me = {

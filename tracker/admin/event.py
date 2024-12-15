@@ -77,6 +77,7 @@ class EventAdmin(RelatedUserMixin, CustomModelAdmin):
                     'timezone',
                     'locked',
                     'allow_donations',
+                    'charity_split',
                 ]
             },
         ),

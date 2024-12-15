@@ -15,7 +15,7 @@ from django.urls import reverse
 from timezone_field import TimeZoneField
 
 from tracker import compat, util
-from tracker.validators import nonzero, positive
+from tracker.validators import max_100, nonzero, positive
 
 from .fields import TimestampField
 from .util import LatestEvent
@@ -278,6 +278,14 @@ class Event(models.Model):
         help_text='Email template to use when the aprize has been shipped to its recipient).',
         related_name='event_prizeshippedtemplates',
         on_delete=models.SET_NULL,
+    )
+    charity_split = models.IntegerField(
+        default=100,
+        null=False,
+        blank=False,
+        verbose_name='Charity Split',
+        help_text='How much of the money is going to the charity, in percentages',
+        validators=[positive, max_100],
     )
 
     def __str__(self):

@@ -39,6 +39,7 @@ export type EventDetails = {
   step: number;
   availableIncentives: { [incentiveId: number]: Incentive };
   prizes: Prize[];
+  charity_split: number;
 };
 
 export type EventDetailsAction =

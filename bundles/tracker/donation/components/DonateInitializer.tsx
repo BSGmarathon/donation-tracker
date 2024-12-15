@@ -58,6 +58,7 @@ type DonateInitializerProps = {
   event: {
     paypalcurrency: string;
     receivername: string;
+    charity_split: number;
   };
   step: number;
   minimumDonation: number;
@@ -121,6 +122,7 @@ const DonateInitializer = (props: DonateInitializerProps) => {
         csrfToken,
         currency: event.paypalcurrency,
         receiverName: event.receivername,
+        charity_split: event.charity_split,
         prizesUrl,
         donateUrl,
         minimumDonation,
