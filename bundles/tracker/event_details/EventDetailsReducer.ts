@@ -17,6 +17,7 @@ const initialState: EventDetailsState = {
   step: 0.01,
   availableIncentives: {},
   prizes: [],
+  charity_split: 100,
 };
 
 function handleLoadEventDetails(state: EventDetailsState, action: ActionFor<'LOAD_EVENT_DETAILS'>) {

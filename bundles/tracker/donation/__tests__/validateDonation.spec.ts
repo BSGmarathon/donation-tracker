@@ -13,6 +13,7 @@ const eventDetails = {
   step: 0.1,
   availableIncentives: [],
   prizes: [],
+  charity_split: 100,
 };
 
 describe('validateDonation', () => {
