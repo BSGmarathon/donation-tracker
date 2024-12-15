@@ -60,7 +60,10 @@ class BidFeedPermission(BasePermission):
         return super().has_permission(request, view) and (
             feed is None
             or feed in self.PUBLIC_FEEDS
-            or request.user.has_perm('tracker.view_hidden_bid')
+            or any(
+                request.user.has_perm(f'tracker.{p}')
+                for p in ('view_hidden_bid', 'change_bid', 'view_bid')
+            )
         )
 
 
@@ -72,7 +75,30 @@ class BidStatePermission(BasePermission):
     def has_object_permission(self, request: Request, view: t.Callable, obj: t.Any):
         return super().has_object_permission(request, view, obj) and (
             obj.state in self.PUBLIC_STATES
-            or request.user.has_perm('tracker.view_hidden_bid')
+            or any(
+                request.user.has_perm(f'tracker.{p}')
+                for p in ('view_hidden_bid', 'change_bid', 'view_bid')
+            )
+        )
+
+
+class DonationBidStatePermission(BasePermission):
+    PUBLIC_STATES = models.Bid.PUBLIC_STATES
+    message = messages.GENERIC_NOT_FOUND
+    code = messages.UNAUTHORIZED_OBJECT_CODE
+
+    def has_permission(self, request, view):
+        has_perm = any(
+            request.user.has_perm(f'tracker.{p}')
+            for p in ('view_hidden_bid', 'change_bid', 'view_bid')
+        )
+        return (
+            super().has_permission(request, view)
+            and has_perm
+            or (
+                ((view.bid is None or view.bid.state in self.PUBLIC_STATES))
+                and ('all' not in request.query_params)
+            )
         )
 
 

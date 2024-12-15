@@ -1,4 +1,5 @@
 from django.utils.translation import gettext_lazy as _
+from rest_framework.exceptions import NotAuthenticated
 
 GENERIC_NOT_FOUND = _(
     'That resource does not exist or you do not have permission to view it.'
@@ -28,8 +29,6 @@ UNAUTHORIZED_OBJECT = _('You do not have permission to view that object.')
 UNAUTHORIZED_OBJECT_CODE = 'unauthorized_object'
 EVENT_READ_ONLY = _('Event is read-only after create for that model.')
 EVENT_READ_ONLY_CODE = 'event_read_only'
-EVENT_LOCKED = _('Event is locked and you do not have permission.')
-EVENT_LOCKED_CODE = 'event_locked'
 INVALID_PK = _('Could not find a related object with the primary key `{pk}`.')
 INVALID_PK_CODE = 'invalid_pk'
 INVALID_NATURAL_KEY = _(
@@ -42,7 +41,15 @@ INVALID_NATURAL_KEY_LENGTH = _(
 INVALID_NATURAL_KEY_LENGTH_CODE = 'invalid_natural_key_length'
 INVALID_LOOKUP_TYPE = _('Could not parse that input as a valid relational key.')
 INVALID_LOOKUP_TYPE_CODE = 'invalid_lookup_type'
+NO_NESTED_CREATES = _('That model creation cannot be nested from this endpoint.')
+NO_NESTED_CREATES_CODE = 'no_nested_creates'
 NO_NESTED_UPDATES = _(
     'Nested models are only writeable on creation, use the endpoint for that specific model instead.'
 )
 NO_NESTED_UPDATES_CODE = 'no_nested_updates'
+ANCHOR_FIELD = _('`event` and `order` fields are implicit if specifying `anchor`.')
+ANCHOR_FIELD_CODE = 'invalid_anchor_sibling'
+INVALID_ANCHOR = _('Specified anchor is not ordered.')
+INVALID_ANCHOR_CODE = 'invalid_anchor'
+NOT_AUTHENTICATED = NotAuthenticated.default_detail
+NOT_AUTHENTICATED_CODE = NotAuthenticated.default_code

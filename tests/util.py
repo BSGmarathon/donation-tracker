@@ -7,11 +7,13 @@ import itertools
 import json
 import logging
 import os
+import pickle
 import random
 import re
 import sys
 import time
 import unittest
+from decimal import Decimal
 
 from django.contrib.admin.models import LogEntry
 from django.contrib.auth.models import AnonymousUser, Permission, User
@@ -22,6 +24,7 @@ from django.db.migrations.executor import MigrationExecutor
 from django.db.models import Q
 from django.test import RequestFactory, TransactionTestCase, override_settings
 from django.urls import reverse
+from paypal.standard.ipn.models import PayPalIPN
 from rest_framework.exceptions import ErrorDetail
 from rest_framework.serializers import ModelSerializer
 from rest_framework.test import APIClient
@@ -34,6 +37,15 @@ from selenium.webdriver.support.ui import Select, WebDriverWait
 from tracker import models, settings, util
 from tracker.api.pagination import TrackerPagination
 from tracker.compat import zoneinfo
+
+
+class PickledRandom(random.Random):
+    # I live in hell
+    def getstate(self):
+        return 'pickled'
+
+    def setstate(self, state):
+        pass
 
 
 def parse_test_mail(mail):
@@ -60,6 +72,35 @@ def parse_csv_response(response):
         line
         for line in csv.reader(io.StringIO(response.content.decode(response.charset)))
     ]
+
+
+def create_ipn(
+    donation,
+    email,
+    *,
+    residence_country='US',
+    custom=None,
+    payment_status='Completed',
+    mc_currency='USD',
+    mc_gross=None,
+    mc_fee=None,
+    txn_id='deadbeef',
+    **kwargs,
+):
+    mc_fee = mc_fee if mc_fee is not None else donation.amount * Decimal('0.03')
+    mc_gross = mc_gross if mc_gross is not None else donation.amount
+    custom = custom if custom is not None else f'{donation.id}:{donation.domainId}'
+    return PayPalIPN.objects.create(
+        residence_country=residence_country,
+        mc_currency=mc_currency,
+        mc_gross=mc_gross,
+        custom=custom,
+        payment_status=payment_status,
+        payer_email=email,
+        mc_fee=mc_fee,
+        txn_id=txn_id,
+        **kwargs,
+    )
 
 
 noon = datetime.time(12, 0)
@@ -179,13 +220,17 @@ class AssertionHelpers:
 
 
 class APITestCase(TransactionTestCase, AssertionHelpers):
+    fixtures = ['countries']
     model_name = None
     serializer_class = None
+    extra_serializer_kwargs = {}
     format_model = None
     view_user_permissions = []  # trickles to add_user and locked_user
     add_user_permissions = []  # trickles to locked_user
     locked_user_permissions = []
+    lookup_key = 'pk'
     encoder = DjangoJSONEncoder()
+    id_field = 'id'
 
     def parseJSON(self, response, status_code=200):
         self.assertEqual(
@@ -235,10 +280,15 @@ class APITestCase(TransactionTestCase, AssertionHelpers):
             self.client.force_authenticate(user=other_kwargs['user'])
         model_name = model_name or self.model_name
         assert model_name is not None
+        lookup_kwargs = {**kwargs}
+        if self.lookup_key == 'pk':
+            pk = obj if isinstance(obj, int) else obj.pk
+            lookup_kwargs['pk'] = pk
         url = reverse(
             self._get_viewname(model_name, 'detail', **kwargs),
-            kwargs={'pk': obj.pk, **kwargs},
+            kwargs=lookup_kwargs,
         )
+
         with self._snapshot('GET', url, data) as snapshot:
             response = self.client.get(
                 url,
@@ -292,10 +342,13 @@ class APITestCase(TransactionTestCase, AssertionHelpers):
         status_code=200,
         data=None,
         kwargs=None,
+        lookup_key=None,
         **other_kwargs,
     ):
         kwargs = kwargs or {}
-        if obj is not None:
+        if lookup_key is None:
+            lookup_key = self.lookup_key
+        if obj is not None and lookup_key == 'pk':
             kwargs['pk'] = obj.pk
         if 'user' in other_kwargs:
             self.client.force_authenticate(user=other_kwargs['user'])
@@ -317,8 +370,10 @@ class APITestCase(TransactionTestCase, AssertionHelpers):
 
     def _check_nested_codes(self, data, codes):
         mismatched_codes = {}
-        if not isinstance(data, (list, dict)):
-            raise TypeError(f'Expected list or dict, got {type(data)}')
+        if not isinstance(data, (list, dict, ErrorDetail)):
+            raise TypeError(f'Expected list, dict, or ErrorDetail, got {type(data)}')
+        if isinstance(data, ErrorDetail):
+            data = [data]
         if isinstance(data, list):
             # FIXME: this comes up if, for example, one entry in an M2M is valid
             #  but the others are not, but there isn't a test case that exercises this
@@ -374,7 +429,7 @@ class APITestCase(TransactionTestCase, AssertionHelpers):
             if mismatched_codes:
                 self.fail(
                     '\n'.join(
-                        f'expected error code for `{field}`: `{code}` not present in `{",".join((e.code if isinstance(e, ErrorDetail) else str(e)) for e in data.get(field, []))}`'
+                        f'expected error code for `{field}`: `{code}` not present in `{",".join((str(e.code) if isinstance(e, ErrorDetail) else str(e)) for e in data.get(field, []))}`'
                         for field, code in mismatched_codes.items()
                     )
                 )
@@ -449,6 +504,9 @@ class APITestCase(TransactionTestCase, AssertionHelpers):
             self._get_viewname(model_name, 'detail', **kwargs),
             kwargs={'pk': obj.pk, **kwargs},
         )
+        if status_code >= 400 and not expected_error_codes:
+            # just a debug point to make an exhaustive pass on this later
+            pass
         with self._snapshot('PATCH', url, data) as snapshot:
             response = self.client.patch(
                 url,
@@ -508,7 +566,11 @@ class APITestCase(TransactionTestCase, AssertionHelpers):
             (
                 f'{prefix}.' if prefix else '' + k,
                 self._compare_model(
-                    expected_model[k], found_model[k], partial, prefix=k
+                    expected_model[k],
+                    found_model[k],
+                    partial,
+                    prefix=k,
+                    missing_ok=missing_ok,
                 ),
             )
             for k in expected_model.keys()
@@ -653,7 +715,8 @@ class APITestCase(TransactionTestCase, AssertionHelpers):
             ), 'no serializer_class provided and raw model was passed'
             expected_model.refresh_from_db()
             expected_model = self.serializer_class(
-                expected_model, **serializer_kwargs or {}
+                expected_model,
+                **{**(serializer_kwargs or {}), **self.extra_serializer_kwargs},
             ).data
             # FIXME: gross hack
             from tracker.api.serializers import EventNestedSerializerMixin
@@ -665,15 +728,15 @@ class APITestCase(TransactionTestCase, AssertionHelpers):
                 (
                     m
                     for m in data
-                    if expected_model['type'] == m['type']
-                    and expected_model['id'] == m['id']
+                    if expected_model['type'] == m.get('type', None)
+                    and expected_model[self.id_field] == m.get(self.id_field, None)
                 ),
                 None,
             )
         ) is None:
             self.fail(
                 'Could not find model "%s:%s" in data'
-                % (expected_model['type'], expected_model['id'])
+                % (expected_model['type'], expected_model[self.id_field])
             )
         problems = self._compare_model(
             expected_model, found_model, partial, missing_ok=missing_ok
@@ -684,7 +747,7 @@ class APITestCase(TransactionTestCase, AssertionHelpers):
                 % (
                     f'{msg}\n' if msg else '',
                     expected_model['type'],
-                    expected_model['id'],
+                    expected_model[self.id_field],
                     '\n'.join(problems),
                 )
             )
@@ -696,15 +759,17 @@ class APITestCase(TransactionTestCase, AssertionHelpers):
             assert hasattr(
                 self, 'serializer_class'
             ), 'no serializer_class provided and raw model was passed'
-            unexpected_model = self.serializer_class(unexpected_model).data
+            unexpected_model = self.serializer_class(
+                unexpected_model, **self.extra_serializer_kwargs
+            ).data
         if (
             next(
                 (
                     model
                     for model in data
                     if (
-                        model['id'] == unexpected_model['id']
-                        and model['type'] == unexpected_model['type']
+                        unexpected_model['type'] == model['type']
+                        and unexpected_model[self.id_field] == model[self.id_field]
                     )
                 ),
                 None,
@@ -713,8 +778,48 @@ class APITestCase(TransactionTestCase, AssertionHelpers):
         ):
             self.fail(
                 'Found model "%s:%s" in data'
-                % (unexpected_model['type'], unexpected_model['id'])
+                % (unexpected_model['type'], unexpected_model[self.id_field])
             )
+
+    def assertExactV2Models(
+        self,
+        expected_models,
+        unexpected_models,
+        data=None,
+        *,
+        exact_count=True,
+        msg=None,
+        **kwargs,
+    ):
+        """similar to V2ModelPresent, but allows you to explicitly check that certain models are not present
+        by default it also asserts exact count, but you can turn that off if you want
+        """
+        problems = []
+        if data is None:
+            data = unexpected_models
+            unexpected_models = []
+        if exact_count and len(data) != len(expected_models):
+            problems.append(
+                f'Data length mismatch, expected {len(expected_models)}, got {len(data)}'
+            )
+        for m in expected_models:
+            try:
+                self.assertV2ModelPresent(m, data, **kwargs)
+            except AssertionError as e:
+                problems.append(str(e))
+        for m in unexpected_models:
+            try:
+                self.assertV2ModelNotPresent(m, data)
+            except AssertionError as e:
+                problems.append(str(e))
+        if problems:
+            parts = []
+            if msg:
+                parts.append(msg)
+            parts.append(f'Had {len(problems)} problem(s) asserting model data:')
+            parts.extend(problems)
+
+            self.fail('\n'.join(parts))
 
     def assertLogEntry(self, model_name: str, pk: int, change_type, message: str):
         from django.contrib.admin.models import LogEntry
@@ -745,13 +850,22 @@ class APITestCase(TransactionTestCase, AssertionHelpers):
     @contextlib.contextmanager
     def saveSnapshot(self):
         # TODO: don't save 'empty' results by default?
-        assert getattr(self, '_save_snapshot', False) is False, 'no nesting this yet'
+        previous = getattr(self, '_save_snapshot', False)
         self._save_snapshot = True
-        self._snapshot_num = 1
+        self._last_subtest = None
         try:
             yield
         finally:
-            self._save_snapshot = False
+            self._save_snapshot = previous
+
+    @contextlib.contextmanager
+    def suppressSnapshot(self):
+        previous = getattr(self, '_save_snapshot', False)
+        self._save_snapshot = False
+        try:
+            yield
+        finally:
+            self._save_snapshot = previous
 
     class _Snapshot:
         def __init__(self, url, method, data=None, stream=None):
@@ -786,12 +900,18 @@ class APITestCase(TransactionTestCase, AssertionHelpers):
                 re.sub(r'^Test', '', self.__class__.__name__),
                 re.sub(r'^test_', '', self._testMethodName).lower(),
             ]
-            subtest = getattr(self, '_subtest', None)
-            while subtest:
+            subtest = self
+            while next_subtest := getattr(subtest, '_subtest', None):
+                subtest = next_subtest
+                if subtest._message == 'happy path':
+                    continue
                 pieces.append(re.sub(r'\W', '_', subtest._message).lower())
-                subtest = subtest._subtest
+
+            if self._last_subtest is not subtest:
+                self._snapshot_num = 1
 
             # obscure ids from url since they can drift depending on test order/results, remove leading tracker since it's redundant, and slugify everything else
+            # FIXME: this doesn't quite work for Country since we don't use PK lookups in the urls
             pieces += [
                 f'S{self._snapshot_num}',
                 re.sub(
@@ -802,6 +922,7 @@ class APITestCase(TransactionTestCase, AssertionHelpers):
 
             snapshot_name = '_'.join(p.strip('_') for p in pieces)
             self._snapshot_num += 1
+            self._last_subtest = subtest
 
             basepath = os.path.join(os.path.dirname(__file__), 'snapshots')
             os.makedirs(basepath, exist_ok=True)
@@ -811,8 +932,15 @@ class APITestCase(TransactionTestCase, AssertionHelpers):
             yield APITestCase._Snapshot(url, method)
 
     def setUp(self):
+        super().setUp()
         self._save_snapshot = False
         self.rand = random.Random()
+        # depending on the environment this might not be pickleable, which makes random test failures extremely
+        #  hard to diagnose
+        try:
+            pickle.dumps(self.rand)
+        except NotImplementedError:
+            self.rand = PickledRandom()
         self.factory = RequestFactory()
         self.client = APIClient()
         self.locked_event = models.Event.objects.create(
@@ -821,6 +949,12 @@ class APITestCase(TransactionTestCase, AssertionHelpers):
             short='locked',
             name='Locked Event',
             locked=True,
+        )
+        self.blank_event = models.Event.objects.create(
+            datetime=tomorrow_noon,
+            targetamount=5,
+            short='blank',
+            name='Blank Event',
         )
         self.event = models.Event.objects.create(
             datetime=today_noon, targetamount=5, short='event', name='Test Event'

@@ -21,21 +21,36 @@ from .util import today_noon
 class TestSpeedRunBase(TransactionTestCase):
     def setUp(self):
         super().setUp()
-        self.event1 = models.Event.objects.create(datetime=today_noon, targetamount=5)
+        if not hasattr(self, 'event'):
+            self.event = models.Event.objects.create(
+                datetime=today_noon, targetamount=5
+            )
         self.run1 = models.SpeedRun.objects.create(
-            name='Test Run', run_time='45:00', setup_time='5:00', order=1
+            event=self.event,
+            name='Test Run',
+            run_time='45:00',
+            setup_time='5:00',
+            order=1,
         )
         self.run2 = models.SpeedRun.objects.create(
-            name='Test Run 2', run_time='15:00', setup_time='5:00', order=2
+            event=self.event,
+            name='Test Run 2',
+            run_time='15:00',
+            setup_time='5:00',
+            order=2,
         )
         self.run3 = models.SpeedRun.objects.create(
-            name='Test Run 3', run_time='5:00', order=3
+            event=self.event, name='Test Run 3', run_time='5:00', order=3
         )
         self.run4 = models.SpeedRun.objects.create(
-            name='Test Run 4', run_time='1:20:00', setup_time='5:00', order=None
+            event=self.event,
+            name='Test Run 4',
+            run_time='1:20:00',
+            setup_time='5:00',
+            order=None,
         )
         self.run5 = models.SpeedRun.objects.create(
-            name='Test Run 5', order=4, run_time='15:00'
+            event=self.event, name='Test Run 5', order=4, run_time='15:00'
         )
         self.runner1 = models.Talent.objects.create(name='trihex')
         self.runner2 = models.Talent.objects.create(name='neskamikaze')
@@ -60,7 +75,7 @@ class TestSpeedRun(TestSpeedRunBase):
         self.assertEqual(self.run1.setup_time, '0:05:00')
 
     def test_first_run_start_time(self):
-        self.assertEqual(self.run1.starttime, self.event1.datetime)
+        self.assertEqual(self.run1.starttime, self.event.datetime)
 
     def test_second_run_start_time(self):
         self.assertEqual(
@@ -98,7 +113,7 @@ class TestSpeedRun(TestSpeedRunBase):
         self.run1.order = None
         self.run1.save()
         self.run2.refresh_from_db()
-        self.assertEqual(self.run2.starttime, self.event1.datetime)
+        self.assertEqual(self.run2.starttime, self.event.datetime)
 
     def test_update_runners_on_save(self):
         self.run1.runners.add(self.runner1, self.runner2)
@@ -450,7 +465,7 @@ class TestSpeedRunAdmin(TransactionTestCase):
             self.assertEqual(self.run2.setup_time, '0:30:40')
             self.run3.refresh_from_db()
             expected_start = datetime.datetime.combine(
-                self.event1.date, datetime.time(19, 35), tzinfo=datetime.timezone.utc
+                self.event1.date, datetime.time(13, 35), tzinfo=self.event1.timezone
             )
             self.assertEqual(self.run3.anchor_time, expected_start)
             self.assertEqual(self.run3.starttime, expected_start)

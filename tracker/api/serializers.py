@@ -1,47 +1,87 @@
 """Define serialization of the Django models into the REST framework."""
 
+import contextlib
 import logging
 from collections import defaultdict
 from contextlib import contextmanager
 from functools import cached_property
 from inspect import signature
 
-from django.core.exceptions import NON_FIELD_ERRORS, ObjectDoesNotExist, ValidationError
+from django.core.exceptions import NON_FIELD_ERRORS, ObjectDoesNotExist
+from django.core.exceptions import ValidationError as DjangoValidationError
 from django.utils.translation import gettext_lazy as _
 from rest_framework import serializers
+from rest_framework.exceptions import ErrorDetail, ValidationError
+from rest_framework.serializers import ListSerializer, as_serializer_error
 from rest_framework.utils import model_meta
+from rest_framework.validators import UniqueTogetherValidator
 
 from tracker.api import messages
-from tracker.models import Interview
 from tracker.models.bid import Bid, DonationBid
+from tracker.models.country import Country, CountryRegion
 from tracker.models.donation import Donation, Donor, Milestone
 from tracker.models.event import Event, SpeedRun, Tag, Talent, VideoLink, VideoLinkType
+from tracker.models.interstitial import Ad, Interstitial, Interview
 
 log = logging.getLogger(__name__)
 
 
 @contextmanager
-def _coalesce_validation_errors(errors):
+def _coalesce_validation_errors(errors, ignored=None):
     """takes either a list, a dict, or a function that can potentially throw ValidationError"""
+    ignored = set(ignored if ignored else [])
     if callable(errors):
         try:
             errors()
-            errors = None
-        except ValidationError as other:
-            errors = other
+            errors = {}
+        except (DjangoValidationError, ValidationError) as e:
+            errors = as_serializer_error(e)
+    elif isinstance(errors, list):
+        if errors:
+            errors = {NON_FIELD_ERRORS: errors}
+        else:
+            errors = {}
     try:
         yield
-    except ValidationError as e:
-        errors = errors or {}
-        if isinstance(errors, list) and errors:
-            errors = {NON_FIELD_ERRORS: errors}
-        errors = e.update_error_dict(errors)
-    if errors:
-        raise ValidationError(errors)
+        other_errors = {}
+    except (DjangoValidationError, ValidationError) as e:
+        other_errors = as_serializer_error(e)
+    if errors or other_errors:
+        all_errors = {}
+        for key, e in errors.items():
+            o = other_errors.get(key, [] if isinstance(e, list) else {})
+            if (isinstance(e, list) and isinstance(o, dict)) or (
+                isinstance(e, dict) and isinstance(o, list)
+            ):
+                raise ValidationError(
+                    {
+                        key: 'Type conflict while processing validation errors, report this as a bug'
+                    },
+                    code='programming_error',
+                )
+            if isinstance(o, list):
+                o = [oe for oe in o if key not in ignored or oe.code != 'required']
+            if e or o:
+                if isinstance(e, list):
+                    all_errors[key] = e + o
+                else:
+                    # FIXME: this doesn't handle nested keys yet, but I don't have a good test case
+                    all_errors[key] = {**e, **o}
+        for key, o in other_errors.items():
+            if isinstance(o, list):
+                o = [oe for oe in o if key not in ignored or oe.code != 'required']
+                if o:
+                    all_errors.setdefault(key, []).extend(o)
+            else:
+                all_errors[key] = {**all_errors.get(key, {}), **o}
+        assert all_errors, 'ended up with an empty error list after merging'
+        raise ValidationError(all_errors)
 
 
-class WithPermissionsSerializerMixin:
+class SerializerWithPermissionsMixin:
     def __init__(self, *args, with_permissions=(), **kwargs):
+        if isinstance(with_permissions, str):
+            with_permissions = (with_permissions,)
         self.permissions = tuple(with_permissions)
         super().__init__(*args, **kwargs)
 
@@ -53,6 +93,41 @@ class TrackerModelSerializer(serializers.ModelSerializer):
         self.nested_creates = getattr(self.Meta, 'nested_creates', [])
         self.exclude_from_clean = exclude_from_clean or []
         super().__init__(instance, **kwargs)
+
+    def get_validators(self):
+        validators = super().get_validators()
+        # we do this ourselves and it causes weird issues elsewhere
+        return tuple(
+            v for v in validators if not isinstance(v, UniqueTogetherValidator)
+        )
+
+    def to_internal_value(self, data):
+        request = self.context.get('request', None)
+        errors = defaultdict(list)
+        if request and request.method == 'POST':
+            for key, value in data.items():
+                field = self.fields.get(key, None)
+                if (
+                    (
+                        isinstance(field, TrackerModelSerializer)
+                        and isinstance(value, dict)
+                    )
+                    or (
+                        isinstance(field, ListSerializer)
+                        and isinstance(field.child, TrackerModelSerializer)
+                        and any(isinstance(v, dict) for v in value)
+                    )
+                ) and key not in self.nested_creates:
+                    errors[key].append(
+                        ErrorDetail(
+                            messages.NO_NESTED_CREATES,
+                            code=messages.NO_NESTED_CREATES_CODE,
+                        )
+                    )
+            for key in errors:
+                data.pop(key, None)
+        with _coalesce_validation_errors(errors, ignored=errors.keys()):
+            return super().to_internal_value(data)
 
     def validate(self, attrs):
         if isinstance(attrs, dict):
@@ -85,13 +160,8 @@ class TrackerModelSerializer(serializers.ModelSerializer):
                     invalid_updates = [k for k in attrs if k in self.nested_creates]
                     if invalid_updates:
                         raise ValidationError(
-                            {
-                                k: ValidationError(
-                                    messages.NO_NESTED_UPDATES,
-                                    code=messages.NO_NESTED_UPDATES_CODE,
-                                )
-                                for k in invalid_updates
-                            }
+                            {k: messages.NO_NESTED_UPDATES for k in invalid_updates},
+                            code=messages.NO_NESTED_UPDATES_CODE,
                         )
         return super().validate(attrs)
 
@@ -229,6 +299,46 @@ class ClassNameField(serializers.Field):
         return obj.__class__.__name__.lower()
 
 
+class CountrySerializer(PrimaryOrNaturalKeyLookup, TrackerModelSerializer):
+    type = ClassNameField()
+
+    class Meta:
+        model = Country
+        fields = (
+            'type',
+            'name',
+            'alpha2',
+            'alpha3',
+            'numeric',
+        )
+
+    def to_representation(self, instance):
+        if self.root == self or getattr(self.root, 'child', None) == self:
+            return super().to_representation(instance)
+        else:
+            return instance.alpha3
+
+
+class CountryRegionSerializer(PrimaryOrNaturalKeyLookup, TrackerModelSerializer):
+    type = ClassNameField()
+    country = CountrySerializer()
+
+    class Meta:
+        model = CountryRegion
+        fields = (
+            'type',
+            'id',
+            'name',
+            'country',
+        )
+
+    def to_representation(self, instance):
+        if self.root == self or getattr(self.root, 'child', None) == self:
+            return super().to_representation(instance)
+        else:
+            return [instance.name, instance.country.alpha3]
+
+
 class EventNestedSerializerMixin:
     event_move = False
 
@@ -237,6 +347,10 @@ class EventNestedSerializerMixin:
         #  ones that use it any more
         super().__init__(*args, **kwargs)
         self.event_pk = event_pk
+        # without this check, patching by event url doesn't work
+        self.event_in_url = (
+            view := self.context.get('view', None)
+        ) and 'event_pk' in view.kwargs
 
     def get_fields(self):
         fields = super().get_fields()
@@ -263,7 +377,11 @@ class EventNestedSerializerMixin:
         return ret
 
     def to_internal_value(self, data):
-        if 'event' not in data and (event_pk := self.get_event_pk()):
+        if (
+            isinstance(data, dict)
+            and 'event' not in data
+            and (event_pk := self.get_event_pk())
+        ):
             data['event'] = event_pk
         value = super().to_internal_value(data)
         return value
@@ -274,7 +392,7 @@ class EventNestedSerializerMixin:
         if (
             not self.event_move
             and self.instance
-            and 'event' in getattr(self, 'initial_data', {})
+            and ('event' in getattr(self, 'initial_data', {}) and not self.event_in_url)
         ):
             raise ValidationError(
                 {'event': messages.EVENT_READ_ONLY}, code=messages.EVENT_READ_ONLY_CODE
@@ -283,7 +401,7 @@ class EventNestedSerializerMixin:
 
 
 class BidSerializer(
-    WithPermissionsSerializerMixin, EventNestedSerializerMixin, TrackerModelSerializer
+    SerializerWithPermissionsMixin, EventNestedSerializerMixin, TrackerModelSerializer
 ):
     type = ClassNameField()
 
@@ -343,8 +461,13 @@ class BidSerializer(
         yield from (child for child in self._tree if child.parent_id == parent.id)
 
     def _has_permission(self, instance):
+        # check for any of the sufficient permissions
         return instance.state in Bid.PUBLIC_STATES or (
-            self.include_hidden and 'tracker.view_hidden_bid' in self.permissions
+            self.include_hidden
+            and (
+                {'tracker.view_hidden_bid', 'tracker.view_bid', 'tracker.change_bid'}
+                & set(self.permissions)
+            )
         )
 
     def to_representation(self, instance, child=False):
@@ -395,14 +518,19 @@ class BidSerializer(
         return fields
 
     def to_internal_value(self, data):
-        value = super().to_internal_value(data)
+        parent = None
+        errors = defaultdict(list)
         if 'parent' in data:
             try:
-                value['parent'] = Bid.objects.filter(pk=data['parent']).first()
+                parent = Bid.objects.filter(pk=data['parent']).first()
             except ValueError:
-                # nonsense values could cause a vague error message here, but if you feed garbage to
-                #  my API you should expect to get garbage back
-                value['parent'] = None
+                errors['parent'].append(
+                    ErrorDetail(messages.INVALID_LOOKUP_TYPE, code='incorrect_type')
+                )
+        with _coalesce_validation_errors(errors):
+            value = super().to_internal_value(data)
+            if parent:
+                value['parent'] = parent
         return value
 
     def validate(self, attrs):
@@ -418,19 +546,39 @@ class BidSerializer(
             return super().validate(attrs)
 
 
-class DonationBidSerializer(serializers.ModelSerializer):
+class DonationBidSerializer(SerializerWithPermissionsMixin, TrackerModelSerializer):
     type = ClassNameField()
     bid_name = serializers.SerializerMethodField()
+    bid_state = serializers.SerializerMethodField()
 
     class Meta:
         model = DonationBid
-        fields = ('type', 'id', 'donation', 'bid', 'bid_name', 'amount')
+        fields = ('type', 'id', 'donation', 'bid', 'bid_name', 'bid_state', 'amount')
 
     def get_bid_name(self, donation_bid: DonationBid):
         return donation_bid.bid.fullname()
 
+    def get_bid_state(self, donation_bid: DonationBid):
+        return donation_bid.bid.state
 
-class DonationSerializer(WithPermissionsSerializerMixin, serializers.ModelSerializer):
+    def _has_permission(self, instance):
+        return (
+            any(
+                f'tracker.{p}' in self.permissions
+                for p in ('view_hidden_bid', 'change_bid', 'view_bid')
+            )
+            or instance.bid.state in Bid.PUBLIC_STATES
+        )
+
+    def to_representation(self, instance):
+        # final check
+        assert self._has_permission(
+            instance
+        ), f'tried to serialize a hidden donation bid without permission {self.permissions}'
+        return super().to_representation(instance)
+
+
+class DonationSerializer(SerializerWithPermissionsMixin, serializers.ModelSerializer):
     type = ClassNameField()
     donor_name = serializers.SerializerMethodField()
     bids = DonationBidSerializer(many=True, read_only=True)
@@ -475,6 +623,9 @@ class DonationSerializer(WithPermissionsSerializerMixin, serializers.ModelSerial
 
 class EventSerializer(PrimaryOrNaturalKeyLookup, TrackerModelSerializer):
     type = ClassNameField()
+    # include these later
+    # allowed_prize_countries = CountrySerializer(many=True)
+    # disallowed_prize_regions = CountryRegionSerializer(many=True)
     timezone = serializers.SerializerMethodField()
     amount = serializers.SerializerMethodField()
     donation_count = serializers.SerializerMethodField()
@@ -497,6 +648,8 @@ class EventSerializer(PrimaryOrNaturalKeyLookup, TrackerModelSerializer):
             'datetime',
             'timezone',
             'use_one_step_screening',
+            # 'allowed_prize_countries',
+            # 'disallowed_prize_regions',
         )
 
     def get_fields(self):
@@ -526,7 +679,7 @@ class EventSerializer(PrimaryOrNaturalKeyLookup, TrackerModelSerializer):
 class TalentSerializer(
     PrimaryOrNaturalKeyLookup,
     TrackerModelSerializer,
-    WithPermissionsSerializerMixin,
+    SerializerWithPermissionsMixin,
     EventNestedSerializerMixin,
 ):
     type = ClassNameField()
@@ -601,7 +754,10 @@ class TagField(serializers.RelatedField):
 
 
 class SpeedRunSerializer(
-    WithPermissionsSerializerMixin, EventNestedSerializerMixin, TrackerModelSerializer
+    PrimaryOrNaturalKeyLookup,
+    SerializerWithPermissionsMixin,
+    EventNestedSerializerMixin,
+    TrackerModelSerializer,
 ):
     type = ClassNameField()
     event = EventSerializer()
@@ -667,14 +823,12 @@ class SpeedRunSerializer(
         return super().to_representation(instance)
 
     def to_internal_value(self, data):
-        last = data.get('order', None) == 'last'
+        last = isinstance(data, dict) and data.get('order', None) == 'last'
         if last:
             del data['order']
         value = super().to_internal_value(data)
-        # I'm not sure what will happen if we somehow get to this point without an event,
-        #  but I think things are already falling apart by then
-        if last and value.get('event', None) is not None:
-            run = value['event'].speedrun_set.last()
+        if last:
+            run = value['event'].speedrun_set.exclude(order=None).last()
             if run:
                 value['order'] = run.order + 1
             else:
@@ -688,13 +842,13 @@ class SpeedRunSerializer(
         return fields
 
 
-class InterviewSerializer(EventNestedSerializerMixin, TrackerModelSerializer):
+class InterstitialSerializer(EventNestedSerializerMixin, TrackerModelSerializer):
     type = ClassNameField()
     event = EventSerializer()
-    tags = TagField(many=True)
+    tags = TagField(many=True, required=False, allow_create=True)
+    anchor = SpeedRunSerializer(required=False)
 
     class Meta:
-        model = Interview
         fields = (
             'type',
             'id',
@@ -702,6 +856,66 @@ class InterviewSerializer(EventNestedSerializerMixin, TrackerModelSerializer):
             'anchor',
             'order',
             'suborder',
+            'tags',
+        )
+
+    def to_internal_value(self, data):
+        errors = defaultdict(list)
+        if anchor := data.get('anchor', None):
+            if 'event' in data:
+                errors['event'].append(
+                    ErrorDetail(messages.ANCHOR_FIELD, code=messages.ANCHOR_FIELD_CODE)
+                )
+            if 'order' in data:
+                errors['order'].append(
+                    ErrorDetail(messages.ANCHOR_FIELD, code=messages.ANCHOR_FIELD_CODE)
+                )
+
+            with contextlib.suppress(ValidationError):
+                if anchor := SpeedRunSerializer().to_internal_value(anchor):
+                    data['anchor'] = anchor.id
+                    data['event'] = anchor.event_id
+                    if anchor.order:
+                        data['order'] = anchor.order
+                    else:
+                        errors['anchor'].append(
+                            ErrorDetail(
+                                messages.INVALID_ANCHOR,
+                                code=messages.INVALID_ANCHOR_CODE,
+                            )
+                        )
+        if last := data.get('suborder', None) == 'last':
+            data['suborder'] = 10000  # TODO: horrible lie to silence the validation
+        with _coalesce_validation_errors(errors):
+            value = super().to_internal_value(data)
+        if last:
+            if interstitial := Interstitial.objects.filter(
+                event=value['event'],
+                order=value['order'],
+            ).last():
+                value['suborder'] = interstitial.suborder + 1
+            else:
+                data['suborder'] = 1
+
+        return value
+
+
+class AdSerializer(InterstitialSerializer):
+    class Meta:
+        model = Ad
+        fields = InterstitialSerializer.Meta.fields + (
+            'sponsor_name',
+            'ad_name',
+            'ad_type',
+            'filename',
+            'blurb',
+        )
+
+
+class InterviewSerializer(InterstitialSerializer):
+    class Meta:
+        model = Interview
+        fields = InterstitialSerializer.Meta.fields + (
             'social_media',
             'interviewers',
             'topic',
@@ -711,14 +925,14 @@ class InterviewSerializer(EventNestedSerializerMixin, TrackerModelSerializer):
             'length',
             'subjects',
             'camera_operator',
-            'tags',
         )
 
 
 class MilestoneSerializer(
-    WithPermissionsSerializerMixin, EventNestedSerializerMixin, TrackerModelSerializer
+    SerializerWithPermissionsMixin, EventNestedSerializerMixin, TrackerModelSerializer
 ):
     type = ClassNameField()
+    event = EventSerializer()
 
     class Meta:
         model = Milestone

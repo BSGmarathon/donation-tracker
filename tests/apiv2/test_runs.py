@@ -28,6 +28,9 @@ class TestRunViewSet(TestSpeedRunBase, APITestCase):
             data = self.get_detail(self.run1, kwargs={'event_pk': self.event.pk})
             self.assertEqual(data, serialized.data)
 
+            data = self.get_detail(self.run4)  # unordered run
+            self.assertV2ModelPresent(self.run4, data)
+
         with self.subTest('wrong event (whether event exists or not)'):
             self.get_detail(
                 self.run1, kwargs={'event_pk': self.event.pk + 1}, status_code=404
@@ -37,17 +40,25 @@ class TestRunViewSet(TestSpeedRunBase, APITestCase):
             self.get_detail(
                 self.run1, data={'tech_notes': ''}, user=None, status_code=403
             )
+            self.get_detail(self.run4, status_code=404)
 
     def test_list(self):
         with self.subTest('normal lists'), self.saveSnapshot():
             serialized = SpeedRunSerializer(
-                models.SpeedRun.objects.filter(event=self.event), many=True
+                models.SpeedRun.objects.filter(event=self.event).exclude(order=None),
+                many=True,
             )
             data = self.get_list()
             self.assertEqual(data['results'], serialized.data)
 
             serialized = SpeedRunSerializer(
-                models.SpeedRun.objects.filter(event=self.event),
+                models.SpeedRun.objects.filter(event=self.event), many=True
+            )
+            data = self.get_list(data={'all': ''})
+            self.assertEqual(data['results'], serialized.data)
+
+            serialized = SpeedRunSerializer(
+                models.SpeedRun.objects.filter(event=self.event).exclude(order=None),
                 event_pk=self.event.pk,
                 many=True,
             )
@@ -56,7 +67,7 @@ class TestRunViewSet(TestSpeedRunBase, APITestCase):
 
         with self.subTest('requesting tech notes'), self.saveSnapshot():
             serialized = SpeedRunSerializer(
-                models.SpeedRun.objects.filter(event=self.event),
+                models.SpeedRun.objects.filter(event=self.event).exclude(order=None),
                 with_permissions=('tracker.can_view_tech_notes',),
                 with_tech_notes=True,
                 many=True,
@@ -66,6 +77,7 @@ class TestRunViewSet(TestSpeedRunBase, APITestCase):
 
         with self.subTest('permissions checks'):
             self.get_list(data={'tech_notes': ''}, user=None, status_code=403)
+            self.get_list(data={'all': ''}, status_code=403)
 
         with self.subTest('not a real event'):
             self.get_list(kwargs={'event_pk': self.event.pk + 100}, status_code=404)
@@ -88,7 +100,11 @@ class TestRunViewSet(TestSpeedRunBase, APITestCase):
         with self.subTest(
             'full blown model w/implicit tag creation'
         ), self.saveSnapshot(), self.assertLogsChanges(1):
-            last_run = models.SpeedRun.objects.filter(event=self.event).last()
+            last_run = (
+                models.SpeedRun.objects.filter(event=self.event)
+                .exclude(order=None)
+                .last()
+            )
             data = self.post_new(
                 data={
                     'event': self.event.short,
@@ -186,9 +202,9 @@ class TestRunViewSet(TestSpeedRunBase, APITestCase):
                 },
             )
 
-        with self.subTest('blank entry smoke test'), self.assertLogsChanges(0):
+        with self.subTest('mostly blank entry'), self.assertLogsChanges(0):
             self.post_new(
-                data={},
+                data={'order': 'last'},
                 status_code=400,
                 expected_error_codes={
                     'event': 'required',
@@ -206,7 +222,7 @@ class TestRunViewSet(TestSpeedRunBase, APITestCase):
                     'setup_time': '5:00',
                     'runners': [self.runner1.id],
                 },
-                kwargs={'event_pk': self.event1.pk},
+                kwargs={'event_pk': self.event.pk},
             )
             model = models.SpeedRun.objects.get(id=data['id'])
             self.assertV2ModelPresent(model, data)
