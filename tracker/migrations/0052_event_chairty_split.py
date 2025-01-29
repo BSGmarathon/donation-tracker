@@ -7,7 +7,7 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('tracker', '0051_merge_20241215_1452'),
+        ('tracker', '0052_delete_interview_text_columns'),
     ]
 
     operations = [

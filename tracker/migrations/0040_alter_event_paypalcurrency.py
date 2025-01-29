@@ -6,7 +6,7 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('tracker', '0039_merge_20240413_0642'),
+        ('tracker', '0039_add_incentive_timing'),
     ]
 
     operations = [

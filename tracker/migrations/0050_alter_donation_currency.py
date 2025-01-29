@@ -6,7 +6,7 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('tracker', '0049_merge_20241014_0918'),
+        ('tracker', '0049_add_milestone_run'),
     ]
 
     operations = [
