@@ -31,6 +31,7 @@ def constants(user=None):
             else ''
         ),
         'STATIC_URL': settings.STATIC_URL,
+        'PAGINATION_LIMIT': settings.TRACKER_PAGINATION_LIMIT,
     }
 
 
@@ -102,6 +103,8 @@ def donate(request, event):
         else:
             result['runname'] = 'Event Wide'
             result['order'] = 0
+        if not (bid.istarget or bid.chain):
+            result['accepted_number'] = bid.accepted_number
         if bid.allowuseroptions:
             result['custom'] = True
             result['maxlength'] = bid.option_max_length

@@ -1,9 +1,9 @@
 import * as React from 'react';
 import { useMutation } from 'react-query';
-import { Anchor, Button, Card, Checkbox, Header, openModal, Spacer, Stack, Text } from '@spyrothon/sparx';
+import { Anchor, Button, Card, Checkbox, Header, openModal, Spacer, Stack, Text } from '@faulty/gdq-design';
 
-import { usePermission } from '@public/api/helpers/auth';
 import APIClient from '@public/apiv2/APIClient';
+import { usePermission } from '@public/apiv2/helpers/auth';
 import * as CurrencyUtils from '@public/util/currency';
 
 import ModCommentModal from '@processing/modules/donations/ModCommentModal';
@@ -36,13 +36,13 @@ export default function ReadingDonationRowPopout(props: ReadingDonationRowPopout
   const donorLink = useAdminRoute(AdminRoutes.DONOR(donation.donor));
   const canEditDonors = usePermission('tracker.change_donor');
 
-  const pin = useMutation(() => APIClient.pinDonation(`${donation.id}`), {
+  const pin = useMutation(() => APIClient.pinDonation(donation.id), {
     onSuccess: donation => loadDonations([donation]),
   });
-  const unpin = useMutation(() => APIClient.unpinDonation(`${donation.id}`), {
+  const unpin = useMutation(() => APIClient.unpinDonation(donation.id), {
     onSuccess: donation => loadDonations([donation]),
   });
-  const block = useMutation(() => APIClient.denyDonationComment(`${donation.id}`), {
+  const block = useMutation(() => APIClient.denyDonationComment(donation.id), {
     onSuccess: donation => {
       loadDonations([donation]);
       removeDonationFromAllGroups(donation.id);

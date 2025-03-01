@@ -1,6 +1,7 @@
 import * as React from 'react';
+import classNames from 'classnames';
 import { useQuery } from 'react-query';
-import { Anchor, Button, Card, FormSwitch, Header, Spacer, Stack, Text, usePopout } from '@spyrothon/sparx';
+import { Anchor, Button, Card, FormSwitch, Header, Spacer, Stack, Text, usePopout } from '@faulty/gdq-design';
 
 import { useConstants } from '@common/Constants';
 import APIClient from '@public/apiv2/APIClient';
@@ -20,22 +21,21 @@ import styles from './PrimaryNavPopout.mod.css';
 // These are hardcoded with `/tracker` as the root path to avoid changing
 // the structure of `CONSTANTS` that gets sent by the bundle host.
 const NavRoutes = {
-  HOME: (eventId: string) => `/tracker/event/${eventId}`,
-  BIDS: (eventId: string) => `/tracker/bids/${eventId}`,
-  DONATIONS: (eventId: string) => `/tracker/donations/${eventId}`,
-  DONORS: (eventId: string) => `/tracker/donors/${eventId}`,
+  HOME: (eventId: string | number) => `/tracker/event/${eventId}`,
+  BIDS: (eventId: string | number) => `/tracker/bids/${eventId}`,
+  DONATIONS: (eventId: string | number) => `/tracker/donations/${eventId}`,
+  DONORS: (eventId: string | number) => `/tracker/donors/${eventId}`,
   EVENTS: `/tracker`,
-  MILESTONES: (eventId: string) => `/tracker/milestones/${eventId}`,
-  PRIZES: (eventId: string) => `/tracker/prizes/${eventId}`,
-  RUNS: (eventId: string) => `/tracker/runs/${eventId}`,
+  MILESTONES: (eventId: string | number) => `/tracker/milestones/${eventId}`,
+  PRIZES: (eventId: string | number) => `/tracker/prizes/${eventId}`,
+  RUNS: (eventId: string | number) => `/tracker/runs/${eventId}`,
   LOGOUT: `/tracker/user/logout/`,
   SELF_SERVICE: `/tracker/user/index/`,
 
   ADMIN_HOME: `/`,
-  INTERSTITIALS: (eventId: string) => `interstitials/${eventId}`,
-  PROCESS_DONATIONS: (eventId: string) => `v2/${eventId}/processing/donations`,
-  READ_DONATIONS: (eventId: string) => `v2/${eventId}/processing/read`,
-  SCHEDULE_EDITOR: (eventId: string) => `schedule_editor/${eventId}`,
+  PROCESS_DONATIONS: (eventId: number) => `v2/${eventId}/processing/donations`,
+  READ_DONATIONS: (eventId: number) => `v2/${eventId}/processing/read`,
+  SCHEDULE_EDITOR: (eventId: number) => `schedule_editor/${eventId}`,
 };
 
 let adminPath = '';
@@ -66,14 +66,14 @@ function CurrentUser() {
 function RelativeTimeSwitch() {
   const useRelativeTimestamps = useUserPreferencesStore(state => state.useRelativeTimestamps);
 
-  const handleChange = React.useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
-    setUseRelativeTimestamps(event.target.checked);
+  const handleChange = React.useCallback((isSelected: boolean) => {
+    setUseRelativeTimestamps(isSelected);
   }, []);
 
   return (
     <FormSwitch
       label="Use Relative Timestamps"
-      note={
+      description={
         <>
           {new Date().toDateString()} vs {'"1 hour ago"'}
         </>
@@ -85,7 +85,7 @@ function RelativeTimeSwitch() {
 }
 
 interface PrimaryNavPopoutProps {
-  eventId: string;
+  eventId: number;
 }
 
 export function PrimaryNavPopout(props: PrimaryNavPopoutProps) {
@@ -94,7 +94,7 @@ export function PrimaryNavPopout(props: PrimaryNavPopoutProps) {
   const hasPrizes = SWEEPSTAKES_URL !== '';
 
   return (
-    <Card floating className={styles.container}>
+    <Card floating className={classNames(styles.container, styles.test)}>
       <Stack direction="horizontal" spacing="space-xl" justify="stretch">
         <Stack spacing="space-lg">
           <CurrentUser />
@@ -114,7 +114,6 @@ export function PrimaryNavPopout(props: PrimaryNavPopoutProps) {
           <Anchor href={path(NavRoutes.ADMIN_HOME)}>Admin Home</Anchor>
           <Anchor href={path(NavRoutes.PROCESS_DONATIONS(eventId))}>Process Donations</Anchor>
           <Anchor href={path(NavRoutes.READ_DONATIONS(eventId))}>Read Donations</Anchor>
-          <Anchor href={path(NavRoutes.INTERSTITIALS(eventId))}>Interstitials</Anchor>
           <Anchor href={path(NavRoutes.SCHEDULE_EDITOR(eventId))}>Schedule Editor</Anchor>
           <Spacer />
           <Header tag="h2" variant="header-md/normal">
@@ -136,7 +135,10 @@ export function PrimaryNavPopout(props: PrimaryNavPopoutProps) {
 
 export function PrimaryNavPopoutButton(props: PrimaryNavPopoutProps) {
   const buttonRef = React.useRef<HTMLButtonElement>(null);
-  const [openPopout, isOpen] = usePopout(() => <PrimaryNavPopout {...props} />, buttonRef, { attach: 'right' });
+  const [openPopout, isOpen] = usePopout(() => <PrimaryNavPopout {...props} />, buttonRef, {
+    attach: 'right',
+    noStyle: true,
+  });
 
   return (
     <Button variant="default/outline" ref={buttonRef} onPress={isOpen ? undefined : openPopout}>

@@ -1,6 +1,8 @@
+import { Permission } from '@common/Permissions';
 import {
   Ad,
   BidBase,
+  BidState,
   Country,
   CountryRegion,
   Donation,
@@ -15,11 +17,13 @@ import {
   Talent,
 } from '@public/apiv2/Models';
 
+type MaybeArray<T> = T | T[];
+
 export type Me = {
   username: string;
   superuser: boolean;
   staff: boolean;
-  permissions: string[];
+  permissions: Permission[];
 };
 
 type SingleKey = number | string | [string];
@@ -40,15 +44,26 @@ interface BidChild
     'event' | 'speedrun' | 'parent' | 'chain' | 'allowuseroptions' | 'close_at' | 'post_run' | 'repeat' | 'goal'
   > {
   readonly bid_type: 'option';
+  options?: BidChild[];
 }
 
-interface TreeBid extends Omit<BidBase, 'event' | 'repeat' | 'allowuseroptions'> {
+export interface FlatBid extends Omit<BidBase, 'event' | 'options' | 'repeat' | 'allowuseroptions'> {
   event?: number;
-  level?: number;
-  repeat?: null | number;
+  repeat?: number | null;
+  allowuseroptions?: boolean;
+  level: number;
+}
+
+export interface TreeBid extends Omit<BidBase, 'event' | 'repeat' | 'allowuseroptions' | 'level'> {
+  event?: number;
   allowuseroptions?: boolean;
   options?: BidChild[];
   chain_steps?: BidChain[];
+}
+
+export interface BidGet {
+  all?: string;
+  now?: string;
 }
 
 export interface BidPost {
@@ -57,19 +72,28 @@ export interface BidPost {
   speedrun?: RunAPId;
   parent?: number;
   goal?: number;
+  state?: BidState;
 }
 
 export type BidPatch = Omit<Partial<BidPost>, 'event'>;
 
 export interface APIEvent extends Omit<Event, 'datetime'> {
   datetime: string;
-  amount?: number;
-  donation_count?: number;
+}
+
+export interface EventGet {
+  totals?: string;
   charity_split: number;
 }
 
 export interface APIDonation extends Omit<Donation, 'event'> {
   event?: number;
+}
+
+export interface DonationGet {
+  all?: '';
+  all_bids?: '';
+  time_gte?: string;
 }
 
 export interface APIRun
@@ -80,6 +104,11 @@ export interface APIRun
   run_time: string;
   setup_time: string;
   anchor_time: null | string;
+}
+
+export interface RunGet {
+  tech_notes?: string;
+  all?: string;
 }
 
 export interface RunPost {
@@ -99,7 +128,7 @@ export interface RunPost {
   commentators?: TalentAPIId[];
   run_time: string;
   setup_time: string;
-  anchor_time?: string;
+  anchor_time?: string | null;
   tech_notes?: string;
   video_links?: {
     link_type: string;
@@ -113,6 +142,10 @@ export type RunPatch = Partial<RunPost>;
 
 export interface APIMilestone extends Omit<Milestone, 'event'> {
   event?: APIEvent;
+}
+
+export interface MilestoneGet {
+  all?: string;
 }
 
 export interface MilestonePost {
@@ -138,6 +171,10 @@ interface InterstitialPost {
   suborder: number | 'last';
   length: string;
   tags?: string[];
+}
+
+export interface InterviewGet {
+  all?: string;
 }
 
 export interface InterviewPost extends InterstitialPost {
@@ -171,6 +208,14 @@ export interface APIPrize extends Omit<Prize, 'event' | 'starttime' | 'endtime' 
   end_draw_time: null | string;
 }
 
+export interface PrizeGet {
+  time?: string;
+  state?: MaybeArray<PrizeState>;
+  name?: string;
+  q?: string;
+  run?: number;
+}
+
 export interface PrizePost {
   event?: EventAPIId;
   name: string;
@@ -193,6 +238,10 @@ export interface PrizePost {
 
 export type PrizePatch = Partial<PrizePost>;
 
+export interface TalentGet {
+  name?: string;
+}
+
 export interface TalentPost {
   name: string;
   stream?: string;
@@ -207,6 +256,10 @@ export interface DonationCommentPatch {
   comment: string;
 }
 
+export interface DonorGet {
+  include_totals?: string;
+}
+
 export type APIModel =
   | APIAd
   | APIDonation
@@ -215,6 +268,7 @@ export type APIModel =
   | APIMilestone
   | APIPrize
   | APIRun
+  | FlatBid
   | TreeBid
   | Country
   | CountryRegion

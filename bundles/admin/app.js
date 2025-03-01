@@ -1,25 +1,20 @@
 import React from 'react';
-import { useDispatch, useSelector } from 'react-redux';
 import { Outlet, Route, Routes } from 'react-router';
 import { BrowserRouter, Link } from 'react-router-dom';
 
 import { useConstants } from '@common/Constants';
 import Loading from '@common/Loading';
-import { actions } from '@public/api';
-import { usePermission } from '@public/api/helpers/auth';
-import V2HTTPUtils from '@public/apiv2/HTTPUtils';
+import { usePermission } from '@public/apiv2/helpers/auth';
+import { useTrackerInit } from '@public/apiv2/hooks';
+import { useEventsQuery } from '@public/apiv2/reducers/trackerApi';
 import Dropdown from '@public/dropdown';
 import Spinner from '@public/spinner';
-
-import { setAPIRoot } from '@tracker/Endpoints';
 
 import NotFound from '../public/notFound';
 import ScheduleEditor from './scheduleEditor';
 
-const Interstitials = React.lazy(() => import('./interstitials' /* webpackChunkName: 'interstitials' */));
-
-const ProcessPendingBids = React.lazy(() =>
-  import('./donationProcessing/processPendingBids' /* webpackChunkName: 'donationProcessing' */),
+const ProcessPendingBids = React.lazy(
+  () => import('./donationProcessing/processPendingBids' /* webpackChunkName: 'donationProcessing' */),
 );
 
 const EventMenuComponents = {};
@@ -28,23 +23,20 @@ function EventMenu(name) {
   return (
     EventMenuComponents[name] ||
     (EventMenuComponents[name] = function EventMenuInner() {
-      const { events, status } = useSelector(state => ({
-        events: state.models.event,
-        status: state.status,
-      }));
+      const { data: events, isLoading } = useEventsQuery();
       const sortedEvents = React.useMemo(
-        () => [...(events || [])].sort((a, b) => b.datetime.localeCompare(a.datetime)),
+        () => [...(events || [])].sort((a, b) => b.datetime.toSeconds() - a.datetime.toSeconds()),
         [events],
       );
 
       return (
-        <Spinner spinning={status.event === 'loading'}>
+        <Spinner spinning={isLoading}>
           {name}
           <ul style={{ display: 'block' }}>
             {sortedEvents &&
               sortedEvents.map(e => (
-                <li key={e.pk}>
-                  <Link to={`${e.pk}`}>{e.short}</Link>
+                <li key={e.id}>
+                  <Link to={`${e.id}`}>{e.short}</Link>
                   {(!e.allow_donations || e.locked) && '🔒'}
                 </li>
               ))}
@@ -56,9 +48,9 @@ function EventMenu(name) {
 }
 
 function DropdownMenu({ name, path }) {
-  const events = useSelector(state => state.models.event);
+  const { data: events } = useEventsQuery();
   const sortedEvents = React.useMemo(
-    () => [...(events || [])].sort((a, b) => b.datetime.localeCompare(a.datetime)),
+    () => [...(events || [])].sort((a, b) => b.datetime.toSeconds() - a.datetime.toSeconds()),
     [events],
   );
 
@@ -76,8 +68,8 @@ function DropdownMenu({ name, path }) {
         <ul style={{ display: 'block' }}>
           {sortedEvents &&
             sortedEvents.map(e => (
-              <li key={e.pk}>
-                <Link to={`${path}/${e.pk}`}>{e.short}</Link>
+              <li key={e.id}>
+                <Link to={`${path}/${e.id}`}>{e.short}</Link>
                 {(!e.allow_donations || e.locked) && '🔒'}
               </li>
             ))}
@@ -89,13 +81,12 @@ function DropdownMenu({ name, path }) {
 
 function Menu() {
   const { ADMIN_ROOT } = useConstants();
-  const canChangeBids = usePermission('tracker.change_bid');
-  const { status } = useSelector(state => ({
-    status: state.status,
-  }));
+  const canViewBids = usePermission('tracker.view_bid');
+  const { data, isFetching } = useEventsQuery();
+
   return (
     <div style={{ height: 60, display: 'flex', alignItems: 'center' }}>
-      <Spinner spinning={status.event !== 'success'}>
+      <Spinner spinning={isFetching} showPartial={!!data}>
         {ADMIN_ROOT && (
           <>
             <a href={ADMIN_ROOT}>Admin Home</a>
@@ -103,9 +94,7 @@ function Menu() {
           </>
         )}
         <DropdownMenu name="Schedule Editor" path="schedule_editor" />
-        &mdash;
-        <DropdownMenu name="Interstitials" path="interstitials" />
-        {canChangeBids && (
+        {canViewBids && (
           <>
             &mdash;
             <DropdownMenu name="Process Pending Bids" path="process_pending_bids" />
@@ -117,37 +106,12 @@ function Menu() {
 }
 
 function App({ rootPath }) {
-  const dispatch = useDispatch();
-
-  const [ready, setReady] = React.useState(false);
-
-  const { status } = useSelector(state => ({
-    status: state.status,
-  }));
-
-  const { API_ROOT, APIV2_ROOT } = useConstants();
-  const canChangeBids = usePermission('tracker.change_bid');
-
-  React.useLayoutEffect(() => {
-    setAPIRoot(API_ROOT);
-    V2HTTPUtils.setAPIRoot(APIV2_ROOT);
-    setReady(true);
-  }, [API_ROOT, APIV2_ROOT]);
-
-  React.useEffect(() => {
-    if (ready) {
-      dispatch(actions.singletons.fetchMe());
-    }
-  }, [dispatch, ready]);
-
-  React.useEffect(() => {
-    if (status.event !== 'success' && status.event !== 'loading' && ready) {
-      dispatch(actions.models.loadModels('event'));
-    }
-  }, [dispatch, status.event, ready]);
+  useTrackerInit();
+  const { isLoading } = useEventsQuery();
+  const canViewBids = usePermission('tracker.view_bid');
 
   return (
-    <Spinner spinning={!ready}>
+    <Spinner spinning={isLoading}>
       <BrowserRouter>
         <Routes>
           <Route path={rootPath}>
@@ -168,18 +132,10 @@ function App({ rootPath }) {
                   </React.Suspense>
                 }
               />
-              <Route
-                path="interstitials/:eventId"
-                element={
-                  <React.Suspense fallback={<Loading />}>
-                    <Interstitials />
-                  </React.Suspense>
-                }
-              />
-              {canChangeBids && (
+              {canViewBids && (
                 <Route path="process_pending_bids/" element={React.createElement(EventMenu('Process Pending Bids'))} />
               )}
-              {canChangeBids && (
+              {canViewBids && (
                 <Route
                   path="process_pending_bids/:eventId"
                   element={

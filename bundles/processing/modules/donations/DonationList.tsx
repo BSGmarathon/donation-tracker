@@ -1,6 +1,6 @@
 import * as React from 'react';
 import { CSSTransition, TransitionGroup } from 'react-transition-group';
-import { Text } from '@spyrothon/sparx';
+import { Text } from '@faulty/gdq-design';
 
 import type { APIDonation as Donation } from '@public/apiv2/APITypes';
 import Spinner from '@public/spinner';
@@ -20,7 +20,7 @@ export default function DonationList(props: DonationListProps) {
   if (isLoading) {
     return (
       <div className={styles.endOfList}>
-        <Spinner />
+        <Spinner spinning />
       </div>
     );
   }

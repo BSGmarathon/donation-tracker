@@ -1,6 +1,6 @@
 import * as React from 'react';
 import classNames from 'classnames';
-import { useSelector } from 'react-redux';
+import { shallowEqual, useSelector } from 'react-redux';
 
 import { useCachedCallback } from '@public/hooks/useCachedCallback';
 import * as CurrencyUtils from '@public/util/currency';
@@ -32,14 +32,17 @@ type DonationBidFormProps = {
 const DonationBidForm = (props: DonationBidFormProps) => {
   const { incentiveId, step, total: donationTotal, className, onSubmit } = props;
 
-  const { currency, incentive, bidChoices, donation, bids, allocatedTotal } = useSelector((state: StoreState) => ({
-    currency: EventDetailsStore.getEventCurrency(state),
-    incentive: EventDetailsStore.getIncentive(state, incentiveId),
-    bidChoices: EventDetailsStore.getChildIncentives(state, incentiveId),
-    donation: DonationStore.getDonation(state),
-    bids: DonationStore.getBids(state),
-    allocatedTotal: DonationStore.getAllocatedBidTotal(state),
-  }));
+  const { currency, incentive, bidChoices, donation, bids, allocatedTotal } = useSelector(
+    (state: StoreState) => ({
+      currency: EventDetailsStore.getEventCurrency(state),
+      incentive: EventDetailsStore.getIncentive(state, incentiveId),
+      bidChoices: EventDetailsStore.getChildIncentives(state, incentiveId),
+      donation: DonationStore.getDonation(state),
+      bids: DonationStore.getBids(state),
+      allocatedTotal: DonationStore.getAllocatedBidTotal(state),
+    }),
+    shallowEqual,
+  );
 
   const remainingDonationTotal = donationTotal - allocatedTotal;
   const remainingDonationTotalString = CurrencyUtils.asCurrency(remainingDonationTotal, { currency });
@@ -111,6 +114,9 @@ const DonationBidForm = (props: DonationBidFormProps) => {
       <Header size={Header.Sizes.H4}>{incentive.runname}</Header>
       <Header size={Header.Sizes.H5}>{incentive.name}</Header>
       <Text size={Text.Sizes.SIZE_14}>{incentive.description}</Text>
+      {incentive.accepted_number && incentive.accepted_number > 1 && (
+        <Text size={Text.Sizes.SIZE_14}>Top {incentive.accepted_number} options will be used!</Text>
+      )}
 
       {incentive.goal ? (
         <React.Fragment>

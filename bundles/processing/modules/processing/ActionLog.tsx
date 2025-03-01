@@ -1,7 +1,7 @@
 import * as React from 'react';
 import { useMutation } from 'react-query';
 import { CSSTransition, TransitionGroup } from 'react-transition-group';
-import { Anchor, Button, Header, Text } from '@spyrothon/sparx';
+import { Anchor, Button, Header, Text } from '@faulty/gdq-design';
 
 import APIClient from '@public/apiv2/APIClient';
 import { APIDonation as Donation } from '@public/apiv2/APITypes';
@@ -36,7 +36,7 @@ function ActionEntry({ action }: { action: HistoryAction }) {
   const store = useProcessingStore();
   const unprocess = useMutation(
     (donationId: number) => {
-      return APIClient.unprocessDonation(`${donationId}`);
+      return APIClient.unprocessDonation(donationId);
     },
     {
       onSuccess: (donation: Donation) => {

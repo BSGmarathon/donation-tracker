@@ -60,6 +60,9 @@ module.exports = {
           {
             loader: 'swc-loader',
             options: {
+              env: {
+                targets: 'defaults',
+              },
               jsc: {
                 assumptions: {
                   iterableIsArray: false,
@@ -138,6 +141,7 @@ module.exports = {
       '@common': path.resolve('bundles', 'common'),
       '@processing': path.resolve('bundles', 'processing'),
       '@public': path.resolve('bundles', 'public'),
+      '@spec': path.resolve('spec'),
       '@tracker': path.resolve('bundles', 'tracker'),
       '@uikit': path.resolve('bundles', 'uikit'),
     },

@@ -6,8 +6,8 @@ import { QueryClient, QueryClientProvider } from 'react-query';
 import { Provider } from 'react-redux';
 
 import Constants from '@common/Constants';
-import { createTrackerStore } from '@public/api';
 import V2HTTPUtils from '@public/apiv2/HTTPUtils';
+import { store } from '@public/apiv2/Store';
 import ErrorBoundary from '@public/errorBoundary';
 
 import App from './app';
@@ -15,7 +15,6 @@ import App from './app';
 import '@common/init';
 
 function Routes(props) {
-  const store = createTrackerStore();
   const queryClient = new QueryClient({
     defaultOptions: {
       queries: {

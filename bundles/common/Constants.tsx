@@ -1,4 +1,4 @@
-import React, { useContext } from 'react';
+import React from 'react';
 
 export const DefaultConstants = {
   PRIVACY_POLICY_URL: '',
@@ -8,13 +8,13 @@ export const DefaultConstants = {
   APIV2_ROOT: '',
   ADMIN_ROOT: '',
   STATIC_URL: '/static/',
-  CSRF_TOKEN: '',
+  PAGINATION_LIMIT: 0,
 };
 
 const Constants = React.createContext(DefaultConstants);
 
 export function useConstants() {
-  return useContext(Constants);
+  return React.useContext(Constants);
 }
 
 export default Constants;

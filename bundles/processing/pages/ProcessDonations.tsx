@@ -1,11 +1,11 @@
 import * as React from 'react';
 import { useQuery, UseQueryResult } from 'react-query';
-import { useParams } from 'react-router';
-import { FormControl, Stack } from '@spyrothon/sparx';
+import { Stack } from '@faulty/gdq-design';
 
-import { usePermission } from '@public/api/helpers/auth';
 import APIClient from '@public/apiv2/APIClient';
 import type { APIDonation as Donation, APIEvent as Event } from '@public/apiv2/APITypes';
+import { usePermission } from '@public/apiv2/helpers/auth';
+import { useEventParam } from '@public/apiv2/hooks';
 
 import DonationList from '../modules/donations/DonationList';
 import { loadDonations, useDonationsInState } from '../modules/donations/DonationsStore';
@@ -22,22 +22,22 @@ import { ProcessDefinition } from '../modules/processing/ProcessingTypes';
 const PROCESSES: Record<ProcessingMode, ProcessDefinition> = {
   flag: {
     donationState: 'unprocessed',
-    fetch: (eventId: string) => APIClient.getUnprocessedDonations(eventId),
-    action: (donationId: string) => APIClient.flagDonation(donationId),
+    fetch: (eventId: number) => APIClient.getUnprocessedDonations(eventId),
+    action: (donationId: number) => APIClient.flagDonation(donationId),
     actionName: 'Sent to Head',
     actionLabel: 'Send to Head',
   },
   confirm: {
     donationState: 'flagged',
-    fetch: (eventId: string) => APIClient.getFlaggedDonations(eventId),
-    action: (donationId: string) => APIClient.sendDonationToReader(donationId),
+    fetch: (eventId: number) => APIClient.getFlaggedDonations(eventId),
+    action: (donationId: number) => APIClient.sendDonationToReader(donationId),
     actionName: 'Sent to Reader',
     actionLabel: 'Send to Reader',
   },
   onestep: {
     donationState: 'unprocessed',
-    fetch: (eventId: string) => APIClient.getUnprocessedDonations(eventId),
-    action: (donationId: string) => APIClient.sendDonationToReader(donationId),
+    fetch: (eventId: number) => APIClient.getUnprocessedDonations(eventId),
+    action: (donationId: number) => APIClient.sendDonationToReader(donationId),
     actionName: 'Sent to Reader',
     actionLabel: 'Send to Reader',
   },
@@ -83,9 +83,7 @@ function Sidebar(props: SidebarProps) {
       <ConnectionStatus refetch={donationsQuery.refetch} isFetching={donationsQuery.isRefetching} />
       <Stack>
         {canSelectModes ? (
-          <FormControl label="Processing Mode">
-            <ProcessingModeSelector initialMode={processingMode} onSelect={handleApprovalModeChanged} />
-          </FormControl>
+          <ProcessingModeSelector initialMode={processingMode} onSelect={handleApprovalModeChanged} />
         ) : null}
         <ProcessingPartitionSettings />
         <SearchKeywordsInput />
@@ -96,14 +94,13 @@ function Sidebar(props: SidebarProps) {
 }
 
 export default function ProcessDonations() {
-  const params = useParams<{ eventId: string }>();
-  const { eventId } = params;
+  const eventId = useEventParam();
 
   const { partition, partitionCount, processingMode } = useProcessingStore();
   const process = PROCESSES[processingMode];
 
-  const { data: event } = useQuery(`events.${eventId}`, () => APIClient.getEvent(eventId!));
-  const donationsQuery = useQuery(`donations.unprocessed.${processingMode}`, () => process.fetch(eventId!), {
+  const { data: event } = useQuery(`events.${eventId}`, () => APIClient.getEvent(eventId));
+  const donationsQuery = useQuery(`donations.unprocessed.${processingMode}`, () => process.fetch(eventId), {
     onSuccess: donations => loadDonations(donations),
   });
 

@@ -2,6 +2,7 @@ from typing import Type
 
 from django.contrib.admin import SimpleListFilter
 from django.contrib.admin import models as admin_models
+from django.contrib.admin.options import IncorrectLookupParameters
 from django.db.models import Q
 
 from tracker import models, search_feeds
@@ -225,3 +226,34 @@ class BidParentFilter(SimpleListFilter):
         ):  # self.value cannot be converted to int for whatever reason
             pass
         return queryset
+
+
+class RunEventListFilter(SimpleListFilter):
+    """Shows a run filter, but only when filtering by Event"""
+
+    title = 'Run'
+    parameter_name = 'run'
+    EVENT_WIDE = ('-', '(Event Wide)')
+
+    def lookups(self, request, model_admin):
+        key = next((k for k in request.GET if k.endswith('event__id__exact')), None)
+        if key:
+            try:
+                runs = models.SpeedRun.objects.filter(event=request.GET[key])
+            except (TypeError, ValueError) as e:
+                raise IncorrectLookupParameters(e) from e
+            return [*((r.id, r.name_with_category) for r in runs), self.EVENT_WIDE]
+        else:
+            return []
+
+    def queryset(self, request, queryset):
+        if self.value():
+            if self.value() == self.EVENT_WIDE[0]:
+                return queryset.filter(speedrun=None)
+            else:
+                try:
+                    return queryset.filter(speedrun=self.value())
+                except (TypeError, ValueError) as e:
+                    raise IncorrectLookupParameters(e) from e
+        else:
+            return queryset

@@ -1,10 +1,10 @@
 import * as React from 'react';
 import { useQuery, UseQueryResult } from 'react-query';
-import { useParams } from 'react-router';
-import { Button, openModal, Stack, Tabs } from '@spyrothon/sparx';
+import { Button, Header, openModal, Stack } from '@faulty/gdq-design';
 
 import APIClient from '@public/apiv2/APIClient';
 import { APIDonation as Donation } from '@public/apiv2/APITypes';
+import { useEventParam } from '@public/apiv2/hooks';
 import Plus from '@uikit/icons/Plus';
 
 import DonationDropTarget from '@processing/modules/donations/DonationDropTarget';
@@ -42,7 +42,7 @@ function useDonationGroupSyncOnLoad() {
       if (ids.size === 0) {
         return;
       }
-      const donations = await APIClient.getDonations(Array.from(ids).map(String));
+      const donations = await APIClient.getDonations([...ids]);
       loadDonations(donations);
 
       const { ready } = useDonationsStore.getState();
@@ -109,8 +109,10 @@ function Sidebar(props: SidebarProps) {
     <Stack spacing="space-xl">
       <ConnectionStatus refetch={donationsQuery.refetch} isFetching={donationsQuery.isRefetching} />
       <SearchKeywordsInput />
-      <Tabs.Group>
-        <Tabs.Header label="Filters" />
+      <Stack spacing="space-xs">
+        <Header tag="h3" variant="header-sm/normal" className={styles.header}>
+          Filters
+        </Header>
         {FILTER_ITEMS.map(item => (
           <FilterGroupTab
             key={item.id}
@@ -120,14 +122,13 @@ function Sidebar(props: SidebarProps) {
             onSelected={onTabSelect}
           />
         ))}
-        <Tabs.Header
-          label={
-            <div className={styles.groupsHeader}>
-              <span className={styles.groupsHeaderTitle}>Custom Groups</span>
-              <Button variant="link/filled" icon={Plus} onPress={handleCreateGroup} />
-            </div>
-          }
-        />
+        <Header tag="h3" variant="header-sm/normal" className={styles.header}>
+          <div className={styles.groupsHeader}>
+            <span className={styles.groupsHeaderTitle}>Custom Groups</span>
+            {/* eslint-disable-next-line react/jsx-no-bind */}
+            <Button variant="link/filled" icon={() => <Plus />} onPress={handleCreateGroup} />
+          </div>
+        </Header>
         {groupItems.map(item => (
           <FilterGroupTab
             key={item.id}
@@ -139,17 +140,16 @@ function Sidebar(props: SidebarProps) {
           />
         ))}
         <FilterGroupTabDropTarget />
-      </Tabs.Group>
+      </Stack>
     </Stack>
   );
 }
 
 export default function ReadDonations() {
-  const params = useParams<{ eventId: string }>();
-  const { eventId } = params;
+  const eventId = useEventParam();
 
-  const { data: event } = useQuery(`events.${eventId}`, () => APIClient.getEvent(eventId!));
-  const donationsQuery = useQuery(`donations.unread`, () => APIClient.getUnreadDonations(eventId!), {
+  const { data: event } = useQuery(`events.${eventId}`, () => APIClient.getEvent(eventId));
+  const donationsQuery = useQuery(`donations.unread`, () => APIClient.getUnreadDonations(eventId), {
     onSuccess: loadDonations,
   });
 

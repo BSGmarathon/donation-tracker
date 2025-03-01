@@ -1,6 +1,7 @@
 """Define class based views for the various API views."""
 
 import contextlib
+import datetime
 import json
 import logging
 from decimal import Decimal
@@ -183,7 +184,9 @@ def normalize_json_value(value):
         return value.pk
     elif isinstance(value, Decimal):
         return str(value)
-    raise TypeError(f'expected a Model or Decimal, got {type(value)}')
+    elif isinstance(value, datetime.datetime):
+        return value.isoformat()
+    raise TypeError(f'expected a Model, Decimal, or datetime, got {type(value)}')
 
 
 class TrackerCreateMixin(mixins.CreateModelMixin):
@@ -269,8 +272,17 @@ class RemoveBrowsableMixin:
 
 
 class TrackerReadViewSet(RemoveBrowsableMixin, viewsets.ReadOnlyModelViewSet):
+    # to allow action decorator to override standard permissions
+    # e.g.
+    # @action(methods=['patch'], permissions_classes=[CanApproveBids], include_tracker_permissions=False)
+    include_tracker_permissions = True
+
     def get_permissions(self):
-        return super().get_permissions() + [DjangoModelPermissionsOrAnonReadOnly()]
+        return super().get_permissions() + (
+            [DjangoModelPermissionsOrAnonReadOnly()]
+            if self.include_tracker_permissions
+            else []
+        )
 
     def permission_denied(self, request, message=None, code=None):
         if code == messages.UNAUTHORIZED_OBJECT_CODE:

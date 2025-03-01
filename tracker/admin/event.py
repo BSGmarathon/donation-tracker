@@ -71,6 +71,9 @@ class EventAdmin(RelatedUserMixin, CustomModelAdmin):
                     'hashtag',
                     'receivername',
                     'receiver_short',
+                    'receiver_solicitation_text',
+                    'receiver_logo',
+                    'receiver_privacy_policy',
                     'use_one_step_screening',
                     'minimumdonation',
                     'auto_approve_threshold',
@@ -211,8 +214,13 @@ class EventAdmin(RelatedUserMixin, CustomModelAdmin):
                     'change_donation',
                     'view_donation',
                     'view_comments',
+                    # bid assignment
+                    'add_donationbid',
+                    'change_donationbid',
+                    'delete_donationbid',
+                    'view_donationbid',
+                    # milestones
                     'view_milestone',
-                    'view_bid',
                 ]
                 tracker_permissions = auth.Permission.objects.filter(
                     content_type__app_label='tracker',
@@ -225,15 +233,16 @@ class EventAdmin(RelatedUserMixin, CustomModelAdmin):
                 tracker_group.permissions.set(tracker_permissions)
                 admin_group = auth.Group.objects.get_or_create(name='Bid Admin')[0]
                 admin_codenames = [
-                    # bid screening/assignment
+                    # bid assignment
                     'add_donationbid',
                     'change_donationbid',
                     'delete_donationbid',
                     'view_donationbid',
+                    # bid screening/editing
                     'add_bid',
                     'change_bid',
                     'view_bid',
-                    'view_hidden_bid',
+                    'top_level_bid',
                     # donations
                     'change_donation',
                     'view_donation',

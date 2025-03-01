@@ -181,6 +181,12 @@ class Bid(mptt.models.MPTTModel):
         verbose_name='Target',
         help_text="Set this if this bid is a 'target' for donations (bottom level choice or challenge)",
     )
+    accepted_number = models.IntegerField(
+        blank=True,
+        null=True,
+        verbose_name='Accepted Number of Options',
+        help_text='Number of accepted options that will be used, e.g. top two choices for a race',
+    )
     allowuseroptions = models.BooleanField(
         default=False,
         verbose_name='Allow User Options',
@@ -243,7 +249,7 @@ class Bid(mptt.models.MPTTModel):
         permissions = (
             ('top_level_bid', 'Can create new top level bids'),
             ('delete_all_bids', 'Can delete bids with donations attached'),
-            ('view_hidden_bid', 'Can view hidden bids'),
+            ('approve_bid', 'Can approve or deny pending bids'),
         )
 
     class MPTTMeta:
@@ -295,11 +301,12 @@ class Bid(mptt.models.MPTTModel):
                             )
                         )
 
-        if self.parent:
-            self.speedrun = self.parent.speedrun
-            self.event = self.parent.event
+        if self.parent_id:
+            root = self.parent.get_root()
+            self.speedrun = root.speedrun
+            self.event = root.event
 
-            max_len = self.parent.option_max_length
+            max_len = root.option_max_length
             if max_len and len(self.name) > max_len:
                 errors['name'].append(
                     ValidationError(
@@ -327,6 +334,10 @@ class Bid(mptt.models.MPTTModel):
             if self.close_at:
                 errors['close_at'].append(
                     ValidationError(_('Cannot set close time on a child bid'))
+                )
+            if self.accepted_number:
+                errors['accepted_number'].append(
+                    ValidationError(_('Accepted Number only applies to top-level bids'))
                 )
 
         if self.biddependency:
@@ -373,6 +384,10 @@ class Bid(mptt.models.MPTTModel):
                     )
             elif self.pk and self.options.count() != 0:
                 errors['istarget'].append(
+                    ValidationError(_('Targets cannot have children'))
+                )
+            if self.accepted_number:
+                errors['accepted_number'].append(
                     ValidationError(_('Targets cannot have children'))
                 )
             if self.allowuseroptions:
@@ -460,6 +475,11 @@ class Bid(mptt.models.MPTTModel):
             self.check_parent()
         if self.speedrun:
             self.event = self.speedrun.event
+        if self.parent is None and not self.istarget:
+            if not self.accepted_number:
+                self.accepted_number = 1
+        else:
+            self.accepted_number = None
         if self.state in ['OPENED', 'CLOSED'] and not self.revealedtime:
             self.revealedtime = util.utcnow()
             analytics.track(
@@ -534,16 +554,6 @@ class Bid(mptt.models.MPTTModel):
 
         return changed
 
-    @property
-    def has_options(self):
-        return self.allowuseroptions or self.public_options.exists()
-
-    @property
-    def public_options(self):
-        return self.options.filter(Q(state='OPENED') | Q(state='CLOSED')).order_by(
-            '-total'
-        )
-
     def update_total(self):
         if not self.pk:
             self.total = 0
@@ -595,7 +605,7 @@ class Bid(mptt.models.MPTTModel):
     def full_label(self, addMoney=True):
         result = [self.fullname()]
         if self.speedrun:
-            result = [self.speedrun.name_with_category(), ' : '] + result
+            result = [self.speedrun.name_with_category, ' : '] + result
         if addMoney:
             result += [' $', '%0.2f' % self.total]
             if self.goal:
@@ -606,7 +616,7 @@ class Bid(mptt.models.MPTTModel):
         if self.parent:
             return f'{self.parent} (Parent) -- {self.name}'
         elif self.speedrun:
-            return f'{self.speedrun.name_with_category()} (Run) -- {self.name}'
+            return f'{self.speedrun.name_with_category} (Run) -- {self.name}'
         else:
             return f'{self.event} (Event) -- {self.name}'
 

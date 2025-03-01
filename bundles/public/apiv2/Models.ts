@@ -1,3 +1,5 @@
+import { DateTime, Duration } from 'luxon';
+
 export type ModelType =
   | 'ad'
   | 'bid'
@@ -28,8 +30,16 @@ export interface Event extends ModelBase {
   timezone: string;
   receivername: string;
   receiver_short: string;
+  receiver_solicitation_text: string;
+  receiver_logo: string;
+  receiver_privacy_policy: string;
   paypalcurrency: string;
   use_one_step_screening: boolean;
+  allow_donations: boolean;
+  locked: boolean;
+  // returned with '?totals'
+  amount?: number;
+  donation_count?: number;
 }
 
 export type DonationTransactionState = 'COMPLETED' | 'PENDING' | 'CANCELLED' | 'FLAGGED';
@@ -78,6 +88,7 @@ export interface BidBase extends ModelBase {
   readonly total: number;
   readonly count: number;
   repeat: null | number;
+  accepted_number?: number;
   istarget: boolean;
   allowuseroptions: boolean;
   option_max_length?: null | number;
@@ -92,7 +103,7 @@ export function findParent(bids: Bid[], bid: Bid) {
   return bids.find(b => b.id === bid.parent);
 }
 
-interface RunBase extends ModelBase {
+export interface Run extends ModelBase {
   readonly type: 'speedrun';
   name: string;
   event: number;
@@ -104,35 +115,37 @@ interface RunBase extends ModelBase {
   onsite: 'ONSITE' | 'ONLINE' | 'HYBRID';
   console: string;
   release_year: number | null;
-  runners: object[];
-  hosts: object[];
-  commentators: object[];
-  starttime: null | luxon.DateTime;
-  endtime: null | luxon.DateTime;
+  runners: Talent[];
+  hosts: Talent[];
+  commentators: Talent[];
+  starttime: null | DateTime;
+  endtime: null | DateTime;
   order: number | null;
   tech_notes?: string;
   layout: string;
-  run_time: luxon.Duration;
-  setup_time: luxon.Duration;
-  anchor_time: luxon.DateTime | null;
+  run_time: Duration;
+  setup_time: Duration;
+  anchor_time: DateTime | null;
   video_links: object[];
   priority_tag: null | string;
   tags: string[];
 }
 
-export interface UnorderedRun extends RunBase {
+export interface UnorderedRun extends Run {
   order: null;
   starttime: null;
   endtime: null;
 }
 
-export interface OrderedRun extends RunBase {
+export interface OrderedRun extends Run {
   order: number;
-  starttime: luxon.DateTime;
-  endtime: luxon.DateTime;
+  starttime: DateTime;
+  endtime: DateTime;
 }
 
-export type Run = OrderedRun | UnorderedRun;
+export interface AnchoredRun extends OrderedRun {
+  anchor_time: DateTime;
+}
 
 export interface Milestone extends ModelBase {
   readonly type: 'milestone';
@@ -214,6 +227,7 @@ export interface Talent extends ModelBase {
 
 export interface Country extends Omit<ModelBase, 'id'> {
   readonly type: 'country';
+  id?: undefined;
   name: string;
   alpha2: string;
   alpha3: string;

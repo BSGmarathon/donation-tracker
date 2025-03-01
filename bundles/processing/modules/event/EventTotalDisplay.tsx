@@ -1,6 +1,6 @@
 import * as React from 'react';
 import { useQuery } from 'react-query';
-import { Header, Stack, Text } from '@spyrothon/sparx';
+import { Header, Stack, Text } from '@faulty/gdq-design';
 
 import APIClient from '@public/apiv2/APIClient';
 import * as CurrencyUtils from '@public/util/currency';
@@ -10,7 +10,7 @@ import useEventTotalStore, { setEventTotalIfNewer } from './EventTotalStore';
 const numberFormat = Intl.NumberFormat('en-US', { maximumFractionDigits: 0 });
 
 interface EventTotalDisplayProps {
-  eventId: string;
+  eventId: number;
 }
 
 export default function EventTotalDisplay(props: EventTotalDisplayProps) {

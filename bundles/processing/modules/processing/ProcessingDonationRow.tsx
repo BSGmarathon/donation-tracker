@@ -1,10 +1,10 @@
 import * as React from 'react';
 import { useMutation } from 'react-query';
-import { Anchor, Button, openModal, Stack, Text } from '@spyrothon/sparx';
+import { Anchor, Button, openModal, Stack, Text } from '@faulty/gdq-design';
 
-import { usePermission } from '@public/api/helpers/auth';
 import APIClient from '@public/apiv2/APIClient';
 import type { APIDonation as Donation } from '@public/apiv2/APITypes';
+import { usePermission } from '@public/apiv2/helpers/auth';
 import TimeUtils from '@public/util/TimeUtils';
 import Approve from '@uikit/icons/Approve';
 import Comment from '@uikit/icons/Comment';
@@ -33,7 +33,7 @@ function useDonationMutation(mutation: (donationId: number) => Promise<Donation>
 
 interface ProcessingActionsProps {
   donation: Donation;
-  action: (donationId: string) => Promise<Donation>;
+  action: (donationId: number) => Promise<Donation>;
   actionName: string;
   actionLabel: string;
 }
@@ -41,12 +41,9 @@ interface ProcessingActionsProps {
 function ProcessingActions(props: ProcessingActionsProps) {
   const { donation, action, actionName, actionLabel } = props;
 
-  const mutation = useDonationMutation((donationId: number) => action(`${donationId}`), actionName);
-  const approve = useDonationMutation(
-    (donationId: number) => APIClient.approveDonationComment(`${donationId}`),
-    'Approved',
-  );
-  const deny = useDonationMutation((donationId: number) => APIClient.denyDonationComment(`${donationId}`), 'Blocked');
+  const mutation = useDonationMutation((donationId: number) => action(donationId), actionName);
+  const approve = useDonationMutation((donationId: number) => APIClient.approveDonationComment(donationId), 'Approved');
+  const deny = useDonationMutation((donationId: number) => APIClient.denyDonationComment(donationId), 'Blocked');
 
   const handleEditModComment = React.useCallback(() => {
     openModal(props => <ModCommentModal donationId={donation.id} {...props} />);
@@ -54,7 +51,7 @@ function ProcessingActions(props: ProcessingActionsProps) {
 
   return (
     <Stack direction="horizontal">
-      <Button onPress={handleEditModComment} variant="link/filled" icon={Comment}></Button>
+      <Button onPress={handleEditModComment} variant="link/filled" icon={Comment} />
       <MutationButton
         mutation={mutation}
         donationId={donation.id}
@@ -84,7 +81,7 @@ function ProcessingActions(props: ProcessingActionsProps) {
 
 interface ProcessingDonationRowProps {
   donation: Donation;
-  action: (donationId: string) => Promise<Donation>;
+  action: (donationId: number) => Promise<Donation>;
   actionName: string;
   actionLabel: string;
 }

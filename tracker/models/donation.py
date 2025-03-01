@@ -89,9 +89,12 @@ class DonationQuerySet(models.QuerySet):
     def prefetch_public_bids(self):
         from tracker.models import Bid, DonationBid
 
+        bids = Bid.objects.public()
+
         return self.prefetch_related(
             Prefetch('bids', queryset=DonationBid.objects.public()),
-            Prefetch('bids__bid', queryset=Bid.objects.public()),
+            Prefetch('bids__bid', queryset=bids),
+            Prefetch('bids__bid__parent', queryset=bids),
         )
 
 
@@ -346,9 +349,17 @@ class Donation(models.Model):
         # TODO: language detection again?
         self.commentlanguage = 'un'
 
-        # TODO: send websocket payload when Donation is local and new
+        post = self.id is None and self.domain == 'LOCAL'
 
         super(Donation, self).save(*args, **kwargs)
+
+        if post:
+            from .. import settings, tasks
+
+            if settings.TRACKER_HAS_CELERY:
+                tasks.post_donation_to_postbacks.delay(self.id)
+            else:
+                tasks.post_donation_to_postbacks(self.id)
 
     def __str__(self):
         donor_name = self.donor.visible_name() if self.donor else '(Unconfirmed)'

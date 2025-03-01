@@ -304,6 +304,15 @@ def generate_bid(
     bid = Bid()
     bid.description = random_bid_description(rand, bid.name)
     assert run or event or parent, 'Need at least one of run, event, or parent'
+    if state in ['PENDING', 'DENIED']:
+        if parent_state is not None:
+            allowuseroptions = True
+            max_depth = min(max_depth, 1)
+        else:
+            assert parent, 'Need to provide parent for pending or denied bids'
+            assert parent.allowuseroptions, 'Parent does not support user options'
+            allowuseroptions = False
+            allow_children = False
     if allowuseroptions is not None:
         bid.allowuseroptions = allowuseroptions
     if parent:
@@ -317,17 +326,13 @@ def generate_bid(
         bid.event = event
     children = []
     assert 0 <= min_children <= max_children
-    if (
-        max_depth > 0
-        and true_false_or_random(rand, allow_children or allowuseroptions)
-        and state not in ['PENDING', 'DENIED']
-    ):
+    if max_depth > 0 and true_false_or_random(rand, allowuseroptions or allow_children):
         num_children = rand.randint(min_children, max_children)
         for c in range(0, num_children):
             children.append(
                 generate_bid(
                     rand,
-                    allow_children=False,
+                    allow_children=max_depth > 1,
                     max_depth=max_depth - 1,
                     add_goal=add_goal,
                     min_goal=min_goal,
@@ -337,8 +342,12 @@ def generate_bid(
                     parent=bid,
                     state=(
                         state
-                        if allowuseroptions is not True
-                        else rand.choice([state, 'DENIED', 'PENDING'])
+                        if state is not None
+                        else (
+                            rand.choice([bid.state, 'DENIED', 'PENDING'])
+                            if allowuseroptions
+                            else bid.state
+                        )
                     ),
                 )
             )
@@ -725,13 +734,11 @@ def generate_interview(
         order = anchor.order
     assert order is not None, 'provide either an anchor, a run, or an order'
     if suborder is None:
-        last = Interstitial.objects.for_run(run).last()
+        last = Interstitial.objects.filter(order=run.order).last()
         suborder = last.suborder + 1 if last else 1
     interview = Interview(event=event, anchor=anchor, order=order, suborder=suborder)
     interview.topic = random_name(rand, 'topic')
-    interview.full_clean(
-        exclude='interviewers'
-    )  # can't set this until we've been saved
+    interview.full_clean()
     return interview
 
 

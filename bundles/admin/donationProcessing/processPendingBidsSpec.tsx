@@ -4,62 +4,66 @@ import { Provider } from 'react-redux';
 import { Route } from 'react-router';
 import { Routes } from 'react-router-dom';
 import { StaticRouter } from 'react-router-dom/server';
-import configureMockStore from 'redux-mock-store';
-import thunk from 'redux-thunk';
-import { render, waitFor } from '@testing-library/react';
+import { act, cleanup, queryByAttribute, render, waitForElementToBeRemoved } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
+import { Me } from '@public/apiv2/APITypes';
 import Endpoints from '@public/apiv2/Endpoints';
 import HTTPUtils from '@public/apiv2/HTTPUtils';
+import { apiRootSlice, trackerApi } from '@public/apiv2/reducers/trackerApi';
+import { store } from '@public/apiv2/Store';
+
+import { getFixturePendingBidTree } from '@spec/fixtures/bid';
+import { getFixturePagedEvent } from '@spec/fixtures/event';
+import { waitForSpinner } from '@spec/helpers/rtl';
 
 import ProcessPendingBids from './processPendingBids';
 
-const mockStore = configureMockStore([thunk]);
-
 describe('ProcessPendingBids', () => {
-  let store: ReturnType<typeof mockStore>;
-  let subject: ReturnType<typeof renderComponent>;
+  let subject: ReturnType<typeof render>;
   const eventId = 1;
 
   let mock: MockAdapter;
+  let me: Me;
 
   beforeAll(() => {
     mock = new MockAdapter(HTTPUtils.getInstance(), { onNoMatch: 'throwException' });
   });
 
   beforeEach(() => {
+    store.dispatch(apiRootSlice.actions.setRoot({ root: '//testserver/', limit: 500, csrfToken: 'deadbeef' }));
     mock.reset();
-    mock.onGet(Endpoints.BIDS(1, 'pending')).reply(200, []);
+    me = {
+      username: 'test',
+      staff: true,
+      superuser: false,
+      permissions: [],
+    };
+    mock.onGet('//testserver/' + Endpoints.ME).reply(() => [200, me]);
+    mock.onGet('//testserver/' + Endpoints.EVENTS).reply(200, getFixturePagedEvent());
+    mock
+      .onGet('//testserver/' + Endpoints.BIDS({ eventId, feed: 'pending', tree: true }))
+      .reply(200, getFixturePendingBidTree());
+  });
+
+  afterEach(() => {
+    cleanup();
   });
 
   afterAll(() => {
     mock.restore();
   });
 
-  it('loads bids on mount', () => {
-    renderComponent({});
-    expect(store.getActions()).toContain(jasmine.objectContaining({ type: 'MODEL_STATUS_LOADING', model: 'bid' }));
+  it('loads bids on mount', async () => {
+    await renderComponent();
+    expect(trackerApi.util.selectCachedArgsForQuery(store.getState(), 'bidTree')).toContain({
+      urlParams: { eventId, feed: 'pending' },
+    });
   });
 
   describe('when the bids have loaded', () => {
-    beforeEach(() => {
-      subject = renderComponent({
-        models: {
-          bid: [
-            {
-              id: 123,
-              name: 'Unapproved',
-              parent: 122,
-            },
-            {
-              id: 122,
-              name: 'Naming Incentive',
-              allowuseroptions: true,
-              option_max_length: 12,
-            },
-          ],
-        },
-      });
+    beforeEach(async () => {
+      await renderComponent();
     });
 
     it('displays the bid/parent info', () => {
@@ -68,28 +72,45 @@ describe('ProcessPendingBids', () => {
       expect(subject.getByText(text => text.includes('Max Option Length: 12'))).not.toBeNull();
     });
 
-    it('has a button to approve', async () => {
-      mock.onPatch(Endpoints.BID(123), { state: 'OPENED' }).replyOnce(200, {});
-      userEvent.click(subject.getByText('Accept'));
-      expect(mock.history.patch.length).toEqual(1);
-      await waitFor(() => expect(subject.getByText('Accepted')).not.toBeNull());
+    it('does not show accept or deny with no user permissions', () => {
+      expect(subject.queryByText('Accept')).toBeNull();
+      expect(subject.queryByText('Deny')).toBeNull();
     });
 
-    it('has a button to deny', async () => {
-      mock.onPatch(Endpoints.BID(123), { state: 'DENIED' }).replyOnce(200, {});
-      userEvent.click(subject.getByText('Deny'));
-      expect(mock.history.patch.length).toEqual(1);
-      await waitFor(() => expect(subject.getByText('Denied')).not.toBeNull());
+    describe('when the user has permission', () => {
+      beforeEach(async () => {
+        me.permissions = ['tracker.approve_bid'];
+        await renderComponent();
+      });
+
+      it('has a button to approve', async () => {
+        mock.onPatch(Endpoints.APPROVE_BID(123)).replyOnce(200, {});
+        expect(subject.getByText(/Pending/)).not.toBeNull();
+        userEvent.click(subject.getByText('Accept'));
+        expect(mock.history.patch.length).toEqual(1);
+        await waitForElementToBeRemoved(() => queryByAttribute('data-test-state', subject.baseElement, 'SAVING'));
+        expect(subject.queryByText(/Pending/)).toBeNull();
+        expect(subject.getByText(/Accepted/)).not.toBeNull();
+      });
+
+      it('has a button to deny', async () => {
+        mock.onPatch(Endpoints.DENY_BID(123)).replyOnce(200, {});
+        expect(subject.getByText(/Pending/)).not.toBeNull();
+        userEvent.click(subject.getByText('Deny'));
+        expect(mock.history.patch.length).toEqual(1);
+        await waitForElementToBeRemoved(() => queryByAttribute('data-test-state', subject.baseElement, 'SAVING'));
+        expect(subject.queryByText(/Pending/)).toBeNull();
+        expect(subject.getByText(/Denied/)).not.toBeNull();
+      });
     });
   });
 
-  function renderComponent(storeState: any) {
-    store = mockStore({
-      models: { ...storeState.models },
-      singletons: { ...storeState.singletons },
-      status: { ...storeState.status },
+  async function renderComponent() {
+    act(() => {
+      store.dispatch(trackerApi.util.resetApiState());
     });
-    return render(
+    cleanup();
+    subject = render(
       <Provider store={store}>
         <StaticRouter location={`/${eventId}`}>
           <Routes>
@@ -98,5 +119,7 @@ describe('ProcessPendingBids', () => {
         </StaticRouter>
       </Provider>,
     );
+
+    await waitForSpinner(subject);
   }
 });

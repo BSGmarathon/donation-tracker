@@ -32,6 +32,7 @@ type Incentive = {
   order: number;
   amount: string; // TODO: this and goal should be numbers but django seems to be serializing them as strings?
   count: number;
+  accepted_number?: number;
   goal?: string;
   description: string;
 };
@@ -58,6 +59,9 @@ type DonateInitializerProps = {
   event: {
     paypalcurrency: string;
     receivername: string;
+    receiver_solicitation_text: string;
+    receiver_logo: string;
+    receiver_privacy_policy: string;
     charity_split: number;
   };
   step: number;
@@ -122,6 +126,9 @@ const DonateInitializer = (props: DonateInitializerProps) => {
         csrfToken,
         currency: event.paypalcurrency,
         receiverName: event.receivername,
+        receiverLogo: event.receiver_logo,
+        receiverPrivacyPolicy: event.receiver_privacy_policy,
+        receiverSolicitationText: event.receiver_solicitation_text,
         charity_split: event.charity_split,
         prizesUrl,
         donateUrl,
