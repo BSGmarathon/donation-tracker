@@ -304,6 +304,13 @@ class TalentFilter(TrackerFilter):
     }
 
 
+class EventFilter(TrackerFilter):
+    filter_keys = {
+        'short': 'short__icontains',
+        'name': 'name__icontains',
+    }
+
+
 class DonationFilter(TrackerFilter):
     filter_keys = {
         'amount': 'amount',

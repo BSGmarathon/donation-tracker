@@ -4,14 +4,13 @@
 This BSG fork fixes some bugs that are in the current version of the GDQ tracker.
 
 Bugs fixed:
-- Websocket path breaking when tracker url is `/`
 - Reading donations not showing bids
 
 Features added:
-- Euro support
 - GBP support
 - Re added the order column to the overview in speedruns
 - Added "charity_split" to allow events to not always forward 100%
+- Allow the v2 api to search for events by short
 
 ## Requirements
 
