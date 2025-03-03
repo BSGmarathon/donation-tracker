@@ -42,7 +42,7 @@ def event_nested_route(path, viewset, *, basename=None, feed=False):
 
 
 # routers generate URLs based on the view sets, so that we don't need to do a bunch of stuff by hand
-router.register(r'events', event.EventViewSet)
+router.register(r'events', event.FilteringEventViewSet)
 event_nested_route(r'bids', bids.BidViewSet, feed=True)
 event_nested_route(r'talent', talent.TalentViewSet)
 event_nested_route(r'runs', run.SpeedRunViewSet)
