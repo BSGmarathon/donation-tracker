@@ -119,7 +119,7 @@ const Donate = (props: DonateProps) => {
           {charity_split}% of your donation goes to {receiverName}, though transaction fees may apply. The remainder goes to supporting future events.
         </Text>
       ) : (
-        <Text size={Text.Sizes.SIZE_16}>Your full donation goes directly to {receiverName}, though transaction fees may apply.</Text>
+        <Text size={Text.Sizes.SIZE_16}>100% of your donation goes directly to {receiverName}, though transaction fees may apply.</Text>
       )}
 
       <section className={styles.section}>
