@@ -1,6 +1,6 @@
+import datetime
 import logging
 from collections import defaultdict
-from datetime import datetime
 from decimal import Decimal
 from gettext import gettext as _
 
@@ -34,14 +34,6 @@ class BidQuerySet(mptt.managers.TreeQuerySet):
     PUBLIC_FEEDS = ('current', 'public', 'open', 'closed')
     ALL_FEEDS = HIDDEN_FEEDS + PUBLIC_FEEDS
 
-    def upcoming(self, **kwargs):
-        return self.filter(self.upcoming_filter(**kwargs))
-
-    def upcoming_filter(self, **kwargs):
-        from .event import SpeedRun
-
-        return Q(speedrun__in=(SpeedRun.objects.upcoming(**kwargs)))
-
     def public(self):
         return self.filter(state__in=['OPENED', 'CLOSED'])
 
@@ -54,10 +46,20 @@ class BidQuerySet(mptt.managers.TreeQuerySet):
     def closed(self):
         return self.filter(state='CLOSED')
 
-    def current(self, **kwargs):
+    def current(self, now=None):
+        """returns all opened bids regardless of timing, plus anything closed that's on the 'current' run,
+        based on 'now', with an hour window to allow for bids that close just before a run becomes current
+        """
+        now = util.parse_time(now)
+
         return self.filter(
-            Q(state__in=['OPENED', 'CLOSED'])
-            & (self.upcoming_filter(**kwargs) | Q(pinned=True))
+            Q(state='OPENED')
+            | Q(
+                state__in=['OPENED', 'CLOSED'],
+                # has not ended yet, and either already started or starts soon
+                speedrun__starttime__lte=now + datetime.timedelta(hours=1),
+                speedrun__endtime__gte=now,
+            )
         )
 
     def pending(self):
@@ -215,9 +217,6 @@ class Bid(mptt.models.MPTTModel):
         decimal_places=2, max_digits=20, editable=False, default=Decimal('0.00')
     )
     count = models.IntegerField(editable=False)
-    pinned = models.BooleanField(
-        default=False, help_text='Will always show up in the current feeds'
-    )
     estimate = TimestampField(
         null=True,
         blank=True,
@@ -513,8 +512,6 @@ class Bid(mptt.models.MPTTModel):
         else:
             self.chain_goal = self.chain_remaining = None
         self.update_total()
-        if self.state != 'OPENED':
-            self.pinned = False
         super(Bid, self).save(*args, **kwargs)
         for option in self.get_children():
             changed = False
@@ -539,9 +536,6 @@ class Bid(mptt.models.MPTTModel):
             changed = True
         if self.state not in ['PENDING', 'DENIED'] and self.state != self.parent.state:
             self.state = self.parent.state
-            changed = True
-        if self.pinned != self.parent.pinned:
-            self.pinned = self.parent.pinned
             changed = True
         if self.chain != self.parent.chain:
             self.chain = self.parent.chain
@@ -573,11 +567,10 @@ class Bid(mptt.models.MPTTModel):
                 and self.istarget
             ):
                 self.state = 'CLOSED'
-                self.pinned = False
                 analytics.track(
                     AnalyticsEventTypes.INCENTIVE_MET,
                     {
-                        'timestamp': datetime.utcnow(),
+                        'timestamp': util.utcnow(),
                         'bid_id': self.pk,
                         'event_id': self.event_id,
                         'run_id': self.speedrun_id,
@@ -685,7 +678,7 @@ class DonationBid(models.Model):
             analytics.track(
                 AnalyticsEventTypes.BID_APPLIED,
                 {
-                    'timestamp': datetime.utcnow(),
+                    'timestamp': util.utcnow(),
                     'event_id': self.donation.event_id,
                     'incentive_id': self.bid.id,
                     'parent_id': self.bid.parent_id,
@@ -699,6 +692,14 @@ class DonationBid(models.Model):
                     'added_manually': False,
                 },
             )
+
+            if self.donation.domain == 'LOCAL':
+                from .. import settings, tasks
+
+                if settings.TRACKER_HAS_CELERY:
+                    tasks.post_donation_to_postbacks.delay(self.donation_id)
+                else:
+                    tasks.post_donation_to_postbacks(self.donation_id)
 
     @property
     def speedrun(self):

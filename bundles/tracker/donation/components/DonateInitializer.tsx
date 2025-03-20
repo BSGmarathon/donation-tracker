@@ -1,4 +1,4 @@
-import * as React from 'react';
+import React from 'react';
 import _ from 'lodash';
 
 import * as CurrencyUtils from '@public/util/currency';
@@ -70,7 +70,6 @@ type DonateInitializerProps = {
   donateUrl: string;
   prizes: Prize[];
   prizesUrl: string;
-  csrfToken: string;
 };
 
 const DonateInitializer = (props: DonateInitializerProps) => {
@@ -84,7 +83,6 @@ const DonateInitializer = (props: DonateInitializerProps) => {
     minimumDonation = 1,
     maximumDonation = Infinity,
     step = 0.01,
-    csrfToken,
     // Donation
     initialForm,
     initialIncentives,
@@ -123,7 +121,6 @@ const DonateInitializer = (props: DonateInitializerProps) => {
 
     dispatch(
       EventDetailsActions.loadEventDetails({
-        csrfToken,
         currency: event.paypalcurrency,
         receiverName: event.receivername,
         receiverLogo: event.receiver_logo,
@@ -139,7 +136,7 @@ const DonateInitializer = (props: DonateInitializerProps) => {
         prizes,
       }),
     );
-  }, [dispatch, event, prizesUrl, donateUrl, minimumDonation, maximumDonation, step, incentives, prizes, csrfToken]);
+  }, [dispatch, event, prizesUrl, donateUrl, minimumDonation, maximumDonation, step, incentives, prizes]);
 
   return null;
 };

@@ -171,9 +171,9 @@ interface Interstitial extends ModelBase {
 export interface Interview extends Interstitial {
   readonly type: 'interview';
   social_media: boolean;
-  interviewers: number[];
   topic: string;
-  subjects: number[];
+  interviewers: Talent[];
+  subjects: Talent[];
   public: boolean;
   prerecorded: boolean;
   producer: string;
@@ -213,6 +213,11 @@ export interface Prize extends ModelBase {
   provider: string;
   creator: null | string;
   creatorwebsite: null | string;
+}
+
+export interface TimedPrize extends Prize {
+  start_draw_time: luxon.DateTime;
+  end_draw_time: luxon.DateTime;
 }
 
 export interface Talent extends ModelBase {

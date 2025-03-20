@@ -14,6 +14,7 @@ import sys
 import time
 import unittest
 import zoneinfo
+from collections import defaultdict
 from decimal import Decimal
 
 import msgpack
@@ -482,7 +483,7 @@ class APITestCase(TransactionTestCase, AssertionHelpers, AssertionModelHelpers):
         return getattr(response, 'data', None)
 
     def _check_nested_codes(self, data, codes):
-        mismatched_codes = {}
+        mismatched_codes = defaultdict(list)
         if not isinstance(data, (list, dict, ErrorDetail)):
             raise TypeError(f'Expected list, dict, or ErrorDetail, got {type(data)}')
         if isinstance(data, ErrorDetail):
@@ -511,17 +512,19 @@ class APITestCase(TransactionTestCase, AssertionHelpers, AssertionModelHelpers):
             actual_codes = {e.code for e in data}
             for code in codes:
                 if code not in actual_codes:
-                    mismatched_codes.setdefault('__any__', []).append(code)
+                    mismatched_codes['__any__'].append(code)
         elif isinstance(codes, dict):
             if isinstance(data, list):
                 for d in data:
                     mismatched_codes.update(self._check_nested_codes(d, codes))
+                else:
+                    mismatched_codes.update(self._check_nested_codes({}, codes))
             elif isinstance(data, dict):
                 for field, code in codes.items():
                     nested = self._check_nested_codes(data.get(field, []), code)
                     if nested:
                         nested.pop('__any__', [])
-                        mismatched_codes.setdefault(field, []).append(code)
+                        mismatched_codes[field].append(code)
         else:
             raise TypeError(f'Expected list, str, or dict, got {type(codes)}')
         return mismatched_codes
@@ -849,7 +852,7 @@ class APITestCase(TransactionTestCase, AssertionHelpers, AssertionModelHelpers):
         missing_ok = []
         if isinstance(expected_model, ModelSerializer):
             expected_model = expected_model.data
-        elif not isinstance(expected_model, dict):
+        elif isinstance(expected_model, models.Model):
             assert (
                 self.serializer_class is not None
             ), 'no serializer_class provided and raw model was passed'
@@ -863,6 +866,10 @@ class APITestCase(TransactionTestCase, AssertionHelpers, AssertionModelHelpers):
 
             if issubclass(self.serializer_class, EventNestedSerializerMixin):
                 missing_ok.append('event')
+        elif not isinstance(expected_model, dict):
+            self.fail(
+                f'expected ModelSerializer instance, Model instance, or dict, got {type(expected_model)}'
+            )
         if (
             found_model := next(
                 (

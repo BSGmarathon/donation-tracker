@@ -6,14 +6,18 @@ import { BaseQueryApi, QueryReturnValue, TypedMutationOnQueryStarted } from '@re
 import { createApi } from '@reduxjs/toolkit/query/react';
 
 import {
+  APIAd,
   APIEvent,
+  APIInterview,
   APIModel,
   APIRun,
   BidGet,
   EventGet,
   FlatBid,
+  InterviewGet,
   Me,
   PaginationInfo,
+  PrizeGet,
   RunGet,
   RunPatch,
   TreeBid,
@@ -21,7 +25,8 @@ import {
 import Endpoints from '@public/apiv2/Endpoints';
 import { parseDuration, parseTime } from '@public/apiv2/helpers/luxon';
 import HTTPUtils from '@public/apiv2/HTTPUtils';
-import { BidState, Event, OrderedRun, Run } from '@public/apiv2/Models';
+import { Ad, BidState, Event, Interview, OrderedRun, Prize, Run } from '@public/apiv2/Models';
+import { processInterstitial, processPrize, processRun } from '@public/apiv2/Processors';
 
 export interface APIError {
   status?: number;
@@ -148,7 +153,7 @@ function simpleQuery<T, URLParams, QueryParams>(
 
 function paginatedQuery<T, AT extends APIModel, URLParams, QueryParams>(
   urlOrFunc: (URLParams extends unknown ? string : never) | ((r?: URLParams) => string),
-  map: (r: AT, i: number, a: AT[], e?: URLParams) => T,
+  map: (m: AT, i: number, a: AT[], e?: URLParams) => T,
   extraParams?: URLParams,
 ): PageQuery<T, URLParams, QueryParams> {
   return async (
@@ -210,7 +215,7 @@ function paginatedQuery<T, AT extends APIModel, URLParams, QueryParams>(
 
 function mutation<T, PatchArgs = void, AT = T>(
   urlFunc: (r: number) => string,
-  map?: (r: AT, i: number, a: AT[]) => T,
+  map?: (m: AT, i: number, a: AT[]) => T,
 ): SingleMutation<T, PatchArgs> {
   return async (args, api): SingleQueryPromise<T> => {
     const { id, ...params } = typeof args === 'object' ? { ...args } : { id: args };
@@ -234,7 +239,7 @@ function mutation<T, PatchArgs = void, AT = T>(
 
 function multiMutation<T, PatchArgs = void, AT = T>(
   urlFunc: (r: number) => string,
-  map?: (r: AT, i: number, a: AT[]) => T,
+  map?: (m: AT, i: number, a: AT[]) => T,
 ): MultiMutation<T, PatchArgs> {
   return async (args, api): MultiQueryPromise<T> => {
     const { id, ...params } = typeof args === 'object' ? { ...args } : { id: args };
@@ -505,23 +510,9 @@ enum TagType {
   'events',
   'bids',
   'runs',
-}
-
-function processRun(r: APIRun, _0?: unknown, _1?: unknown, e?: number): Run {
-  const { event, starttime, endtime, run_time, setup_time, anchor_time, ...rest } = r;
-  const eventId = e || (typeof event === 'number' ? event : event?.id);
-  if (eventId == null) {
-    throw new Error('no event could be parsed');
-  }
-  return {
-    event: eventId,
-    starttime: starttime ? DateTime.fromISO(starttime) : null,
-    endtime: endtime ? DateTime.fromISO(endtime) : null,
-    run_time: parseDuration(run_time),
-    setup_time: parseDuration(setup_time),
-    anchor_time: anchor_time ? DateTime.fromISO(anchor_time) : null,
-    ...rest,
-  };
+  'prizes',
+  'interviews',
+  'ads',
 }
 
 export const trackerApi = createApi({
@@ -583,6 +574,33 @@ export const trackerApi = createApi({
       queryFn: mutation(Endpoints.DENY_BID),
       onQueryStarted: updateAllBids('DENIED'),
     }),
+    prizes: build.query<
+      Prize[],
+      { urlParams?: Parameters<typeof Endpoints.PRIZES>[0]; queryParams?: WithPage<PrizeGet> }
+    >({
+      queryFn: paginatedQuery(Endpoints.PRIZES, processPrize),
+      providesTags: ['prizes'],
+    }),
+    interviews: build.query<
+      Interview[],
+      {
+        urlParams?: WithEvent<Parameters<typeof Endpoints.INTERVIEWS>[0]>;
+        queryParams?: WithPage<InterviewGet>;
+      }
+    >({
+      queryFn: paginatedQuery(Endpoints.INTERVIEWS, processInterstitial<APIInterview, Interview>),
+      providesTags: ['interviews'],
+    }),
+    ads: build.query<
+      Ad[],
+      {
+        urlParams?: WithEvent<Parameters<typeof Endpoints.ADS>[0]>;
+        queryParams?: WithPage;
+      }
+    >({
+      queryFn: paginatedQuery(Endpoints.ADS, processInterstitial<APIAd, Ad>),
+      providesTags: ['ads'],
+    }),
   }),
 });
 
@@ -592,15 +610,25 @@ type CacheKey = 'bidTree' | 'bids' | 'runs';
 
 export const {
   useMeQuery,
+  useLazyMeQuery,
   useEventsQuery,
   useLazyEventsQuery,
   useRunsQuery,
+  useLazyRunsQuery,
   usePatchRunMutation,
   useMoveRunMutation,
   useBidsQuery,
+  useLazyBidsQuery,
   useBidTreeQuery,
+  useLazyBidTreeQuery,
   useApproveBidMutation,
   useDenyBidMutation,
+  usePrizesQuery,
+  useLazyPrizesQuery,
+  useInterviewsQuery,
+  useLazyInterviewsQuery,
+  useAdsQuery,
+  useLazyAdsQuery,
 } = trackerApi;
 
 interface RootShape {

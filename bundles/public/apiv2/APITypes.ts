@@ -54,7 +54,7 @@ export interface FlatBid extends Omit<BidBase, 'event' | 'options' | 'repeat' | 
   level: number;
 }
 
-export interface TreeBid extends Omit<BidBase, 'event' | 'repeat' | 'allowuseroptions' | 'level'> {
+export interface TreeBid extends Omit<BidBase, 'event' | 'repeat' | 'allowuseroptions' | 'level' | 'parent'> {
   event?: number;
   allowuseroptions?: boolean;
   options?: BidChild[];
@@ -157,12 +157,15 @@ export interface MilestonePost {
 
 export type MilestonePatch = Partial<MilestonePost>;
 
-export interface APIInterview extends Omit<Interview, 'event' | 'length' | 'interviewers' | 'subjects'> {
+export type APIInterstitial<T = object, F extends string | number | symbol = never> = Omit<
+  T,
+  'event' | 'length' | F
+> & {
   event?: number | APIEvent;
   length: string;
-  interviewers: Talent[];
-  subjects: Talent[];
-}
+};
+
+export type APIInterview = APIInterstitial<Interview>;
 
 interface InterstitialPost {
   event?: EventAPIId;
@@ -185,10 +188,7 @@ export interface InterviewPost extends InterstitialPost {
 
 export type InterviewPatch = Partial<InterviewPost>;
 
-export interface APIAd extends Omit<Ad, 'event' | 'length'> {
-  event?: number | APIEvent;
-  length: string;
-}
+export type APIAd = APIInterstitial<Ad>;
 
 export interface AdPost extends InterstitialPost {
   filename: string;
@@ -264,6 +264,7 @@ export type APIModel =
   | APIAd
   | APIDonation
   | APIEvent
+  | APIInterstitial
   | APIInterview
   | APIMilestone
   | APIPrize
