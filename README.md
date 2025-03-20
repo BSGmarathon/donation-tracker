@@ -11,6 +11,7 @@ Features added:
 - Re added the order column to the overview in speedruns
 - Added "charity_split" to allow events to not always forward 100%
 - Allow the v2 api to search for events by short
+- Changed the wording on the donation page to include transaction fees
 
 ## Requirements
 
