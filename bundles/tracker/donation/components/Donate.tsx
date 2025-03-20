@@ -119,10 +119,10 @@ const Donate = (props: DonateProps) => {
       </Header>
       {charity_split < 100 ? (
         <Text size={Text.Sizes.SIZE_16}>
-          {charity_split}% of your donation goes to {receiverName}, the rest goes to the event itself.
+          {charity_split}% of your donation goes to {receiverName}, though transaction fees may apply. The remainder goes to supporting future events.
         </Text>
       ) : (
-        <Text size={Text.Sizes.SIZE_16}>100% of your donation goes directly to {receiverName}.</Text>
+        <Text size={Text.Sizes.SIZE_16}>100% of your donation goes directly to {receiverName}, though transaction fees may apply.</Text>
       )}
 
       <section className={styles.section}>
