@@ -362,7 +362,7 @@ class Donation(models.Model):
                 tasks.post_donation_to_postbacks(self.id)
 
     def __str__(self):
-        donor_name = self.donor.visible_name() if self.donor else '(Unconfirmed)'
+        donor_name = self.donor.visible_name if self.donor else '(Unconfirmed)'
         return f'{donor_name} ({self.amount}) {self.timereceived}'
 
 
@@ -497,12 +497,14 @@ class Donor(models.Model):
         # avoid breaking prefetch
         return next((dc for dc in self.cache.all() if dc.event_id == event_id), None)
 
+    @property
     def visible_name(self):
+        # TODO: clean this up a bit
         if self.visibility == 'ANON':
             return Donor.ANONYMOUS
         elif self.visibility == 'ALIAS':
             if self.alias:
-                return f'{self.alias}#{self.alias_num}'
+                return self.full_alias
             else:
                 return Donor.ANONYMOUS
         last_name, first_name = self.lastname, self.firstname
@@ -513,7 +515,9 @@ class Donor(models.Model):
         alias = f' ({self.alias})' if self.alias else ''
         return f'{last_name}, {first_name}{alias}'
 
+    @property
     def full_visible_name(self):
+        # TODO: clean this up a bit
         if self.visibility == 'ANON':
             return Donor.ANONYMOUS
         elif self.visibility == 'ALIAS':
@@ -525,6 +529,16 @@ class Donor(models.Model):
             last_name = last_name[:1] + '...'
         alias = f' ({self.full_alias})' if self.alias else ''
         return f'{last_name}, {first_name}{alias}'
+
+    @property
+    def full_name(self):
+        if self.firstname:
+            if self.lastname:
+                return f'{self.lastname}, {self.firstname}'
+            else:
+                return self.firstname
+        else:
+            return '(No Name Supplied)'
 
     @property
     def full_alias(self):
@@ -540,7 +554,7 @@ class Donor(models.Model):
     #     )
 
     def __repr__(self):
-        return self.visible_name()
+        return self.visible_name
 
     def __str__(self):
         if not self.lastname and not self.firstname:
@@ -646,6 +660,10 @@ class DonorCache(models.Model):
     @property
     def full_visible_name(self):
         return self.donor.full_visible_name
+
+    @property
+    def full_name(self):
+        return self.donor.full_name
 
     @property
     def firstname(self):
