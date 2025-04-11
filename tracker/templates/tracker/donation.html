@@ -72,6 +72,6 @@
         </table>
     {% endif %}
 
-    <p align="center"><a href="{% url 'tracker:donationindex' event=donation.event.short %}">{% trans "Back to Donation Index" %}</a></p>
+    <p align="center"><a class="link-{{settings.MARATHON_ORG}}" href="{% url 'tracker:donationindex' event=donation.event.short %}">{% trans "Back to Donation Index" %}</a></p>
     {% include "tracker/partials/navfooter.html" %}
 {% endblock %}

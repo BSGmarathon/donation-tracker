@@ -95,6 +95,6 @@
       {% endfor %}
     </table>
 	{% endif %}
-	<p align="center"><a href="{% url 'tracker:runindex' event=event.short %}">{% trans "Back to Run Index" %}</a></p>
+	<p align="center"><a class="link-{{settings.MARATHON_ORG}}" href="{% url 'tracker:runindex' event=event.short %}">{% trans "Back to Run Index" %}</a></p>
 	{% include "tracker/partials/navfooter.html" %}
 {% endblock %}

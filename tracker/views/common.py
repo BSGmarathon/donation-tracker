@@ -62,6 +62,7 @@ def tracker_context(request, qdict=None):
             'settings': {
                 'TRACKER_SWEEPSTAKES_URL': settings.TRACKER_SWEEPSTAKES_URL,
                 'TRACKER_LOGO': settings.TRACKER_LOGO,
+                'MARATHON_ORG': settings.MARATHON_ORG,
             },
         }
     )
