@@ -128,6 +128,17 @@ production mode and enabled in development.
 This can potentially override DRF's own explicit or default settings, but only in that it will remove the renderer in
 question if it's in the list.
 
+#### MARATHON_ORG
+
+Type: `str`
+
+Default: `''`
+
+Allows you to implement specific styling overrides based on naming conventions. Valid entries include the following:
+```
+bsg
+```
+
 ### Testing Your Deploy (WIP)
 
 - PayPal currently requires the receiver account to have IPNs turned on so that payment can be confirmed
