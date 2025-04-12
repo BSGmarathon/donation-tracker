@@ -54,7 +54,7 @@
 	{% for run in runs %}
 		<tr class="small">
 			<td>
-				<a class="link-bsg" href="{% url 'tracker:run' pk=run.pk %}">{{ run.name_with_category }}</a>
+				<a class="link-{{settings.MARATHON_ORG}}" href="{% url 'tracker:run' pk=run.pk %}">{{ run.name_with_category }}</a>
 			</td>
 			<td>
         {{ run.runners_text }}
