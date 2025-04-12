@@ -12,6 +12,7 @@ Features added:
 - Added "charity_split" to allow events to not always forward 100%
 - Allow the v2 api to search for events by short
 - Changed the wording on the donation page to include transaction fees
+- Added a setting variable to allow styling overrides
 
 ## Requirements
 
@@ -134,7 +135,7 @@ Type: `str`
 
 Default: `''`
 
-Allows you to implement specific styling overrides based on naming conventions. Valid entries include the following:
+Allows you to implement specific styling overrides based on naming conventions. If the entered value is not one of the following, the system will fall back to the default GDQ colors. Valid entries include the following:
 ```
 bsg
 ```
