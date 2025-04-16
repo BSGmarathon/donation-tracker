@@ -47,6 +47,16 @@ class TrackerSettings(object):
     def TRACKER_ENABLE_BROWSABLE_API(self):
         return getattr(settings, 'TRACKER_ENABLE_BROWSABLE_API', settings.DEBUG)
 
+    @property
+    def MARATHON_ORG(self):
+        marathon_name = getattr(settings, 'MARATHON_ORG', '').lower()
+        # Validate manually if marathon_org is a valid name to apply specific styling
+        # otherwise we fall back to default styling
+        if marathon_name in ['bsg']:
+            return marathon_name
+        else:
+            return ''
+
     # pass everything else through for convenience
     def __getattr__(self, item):
         return getattr(settings, item)
@@ -117,4 +127,8 @@ def tracker_settings_checks(app_configs, **kwargs):
                 id='tracker.E108',
             )
         )
+
+    # Switch for deciding some marathon specific styling
+    if type(TrackerSettings().MARATHON_ORG) != str:
+        errors.append(Error('MARATHON_ORG should be a string', id='tracker.E109'))
     return errors

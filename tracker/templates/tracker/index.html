@@ -9,6 +9,9 @@
 
 {% block head %}
     <link rel="stylesheet" type="text/css" href="{% static 'main.css' %}" />
+    {% if settings.MARATHON_ORG == 'bsg' %}
+        <link rel="stylesheet" type="text/css" href="{% static 'bsg.css' %}" />
+    {% endif %}
 {% endblock %}
 
 {% block content %}

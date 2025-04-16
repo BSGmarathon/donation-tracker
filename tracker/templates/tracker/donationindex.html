@@ -8,7 +8,11 @@
 
 {% block content %}
 
-    <div class="fa-stack center-block medium-icon-blue fa-5x">
+    {% if settings.MARATHON_ORG != '' %}
+        <div class="fa-stack center-block fa-5x medium-icon-{{settings.MARATHON_ORG}}">
+    {% else %}
+        <div class="fa-stack center-block fa-5x medium-icon-blue">
+    {% endif %}
         <i class="fa fa-circle fa-stack-2x"></i> <i class="fa fa-money fa-stack-1x fa-inverse"></i>
     </div>
 
@@ -55,7 +59,7 @@
                     {{ donation.timereceived|date:"c" }}
                 </td>
                 <td>
-                    <a href="{% url 'tracker:donation' pk=donation.id %}">{{ donation.amount|money }}</a>
+                    <a class="link-{{settings.MARATHON_ORG}}" href="{% url 'tracker:donation' pk=donation.id %}">{{ donation.amount|money }}</a>
                 </td>
                 <td>
                     {{ donation.comment|length|yesno:_("Yes,No") }}

@@ -1,0 +1,23 @@
+.medium-icon-bsg {
+    color: #cf773b;
+}
+
+h2 {
+    color: #cf773b !important;
+}
+
+.btn-info, .btn-primary {
+    color: #fff !important;
+    background-color: #cf773b !important;
+    border-color: #cf5e13 !important;
+}
+
+.btn-info:hover, .btn-primary:hover{
+    color: #fff !important;
+    background-color: #cf763bd5 !important;
+    border-color: #cf5e13ce !important;
+}
+
+.link-bsg {
+    color: #914e21 !important;
+}
