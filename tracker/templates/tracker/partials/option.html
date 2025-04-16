@@ -6,7 +6,7 @@
         {% if chained %}
           {{ bid.name }}
         {% else %}
-          <a class="link-bsg" href="{% url 'tracker:bid' pk=bid.id %}">
+          <a class="link-{{settings.MARATHON_ORG}}" href="{% url 'tracker:bid' pk=bid.id %}">
             {{ bid.name }}
           </a>
         {% endif %}
