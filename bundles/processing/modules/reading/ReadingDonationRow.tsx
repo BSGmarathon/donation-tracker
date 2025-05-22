@@ -123,6 +123,7 @@ export default function ReadingDonationRow(props: DonationRowProps) {
       renderActions={renderActions}
       onDrop={onDrop}
       canDrop={canDrop}
+      showBids
     />
   );
 }
