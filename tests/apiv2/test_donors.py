@@ -96,7 +96,7 @@ class TestDonor(APITestCase):
             )
 
         data = self.get_list(
-            user=self.view_user, kwargs={'event_pk': self.locked_event.id}
+            user=self.view_user, kwargs={'event_pk': self.archived_event.id}
         )
         self.assertEmptyModels(data)
 
@@ -105,7 +105,7 @@ class TestDonor(APITestCase):
                 self.get_detail(
                     self.visible_donor,
                     user=self.view_user,
-                    kwargs={'event_pk': self.locked_event.id},
+                    kwargs={'event_pk': self.archived_event.id},
                     status_code=404,
                 )
 
@@ -114,7 +114,7 @@ class TestDonor(APITestCase):
                 self.get_detail(self.visible_donor, user=None, status_code=403)
 
     def test_serializer(self):
-        data = DonorSerializer(self.visible_donor, include_totals=True).data
+        data = self._serialize_models(self.visible_donor, include_totals=True)
         formatted = self._format_donor(self.visible_donor, include_totals=True)
         # FIXME
         data['totals'] = sorted(data['totals'], key=lambda t: t['event'] or 0)
@@ -126,5 +126,5 @@ class TestDonor(APITestCase):
             msg='Cache count did not match',
         )
 
-        data = DonorSerializer(self.anonymous_donor).data
+        data = self._serialize_models(self.anonymous_donor)
         self.assertEqual(data, self._format_donor(self.anonymous_donor))

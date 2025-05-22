@@ -501,7 +501,14 @@ class BidSerializer(
     bid_type = serializers.SerializerMethodField()
     event_move = True
 
-    def __init__(self, *args, include_hidden=False, feed=None, tree=False, **kwargs):
+    def __init__(
+        self,
+        *args,
+        include_hidden=False,
+        feed=None,
+        tree=False,
+        **kwargs,
+    ):
         super().__init__(*args, **kwargs)
         self.include_hidden = include_hidden
         self.feed = feed
@@ -551,12 +558,14 @@ class BidSerializer(
     @cached_property
     def _tree(self):
         # for a tree list view we want to cache all the possible descendants
-        if isinstance(self.instance, list):
-            return Bid.objects.filter(
-                pk__in=(b.pk for b in self.instance)
-            ).get_descendants()
-        else:
+        if isinstance(self.instance, Bid):
             return self.instance.get_descendants()
+        else:
+            return (
+                Bid.objects.filter(pk__in=(b.pk for b in self.instance))
+                .only('pk')
+                .get_descendants()
+            )
 
     def _find_descendants(self, parent):
         for child in self._tree:
@@ -662,16 +671,34 @@ class DonationBidSerializer(SerializerWithPermissionsMixin, TrackerModelSerializ
     type = ClassNameField()
     bid_name = serializers.SerializerMethodField()
     bid_state = serializers.SerializerMethodField()
+    bid_count = serializers.SerializerMethodField()
+    bid_total = serializers.SerializerMethodField()
 
     class Meta:
         model = DonationBid
-        fields = ('type', 'id', 'donation', 'bid', 'bid_name', 'bid_state', 'amount')
+        fields = (
+            'type',
+            'id',
+            'donation',
+            'bid',
+            'bid_name',
+            'bid_state',
+            'bid_count',
+            'bid_total',
+            'amount',
+        )
 
     def get_bid_name(self, donation_bid: DonationBid):
         return donation_bid.bid.fullname()
 
     def get_bid_state(self, donation_bid: DonationBid):
         return donation_bid.bid.state
+
+    def get_bid_count(self, donation_bid: DonationBid):
+        return donation_bid.bid.count
+
+    def get_bid_total(self, donation_bid: DonationBid):
+        return donation_bid.bid.total
 
     def _has_permission(self, instance):
         return (
@@ -782,6 +809,7 @@ class EventSerializer(PrimaryOrNaturalKeyLookup, TrackerModelSerializer):
     timezone = serializers.SerializerMethodField()
     amount = serializers.SerializerMethodField()
     donation_count = serializers.SerializerMethodField()
+    locked = serializers.SerializerMethodField()
 
     def __init__(self, *args, with_totals=False, **kwargs):
         super().__init__(*args, **kwargs)
@@ -807,6 +835,8 @@ class EventSerializer(PrimaryOrNaturalKeyLookup, TrackerModelSerializer):
             'receiver_privacy_policy',
             'use_one_step_screening',
             'locked',
+            'archived',
+            'draft',
             'allow_donations',
             # 'allowed_prize_countries',
             # 'disallowed_prize_regions',
@@ -819,6 +849,9 @@ class EventSerializer(PrimaryOrNaturalKeyLookup, TrackerModelSerializer):
             del fields['donation_count']
 
         return fields
+
+    def get_locked(self, obj):
+        return obj.archived
 
     def get_timezone(self, obj):
         return str(obj.timezone)

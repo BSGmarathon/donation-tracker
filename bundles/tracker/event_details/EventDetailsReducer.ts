@@ -1,4 +1,4 @@
-import _ from 'lodash';
+import keyBy from 'lodash/keyBy';
 
 import { ActionFor, ActionTypes } from '@tracker/Action';
 
@@ -39,7 +39,7 @@ function handleLoadIncentives(state: EventDetailsState, action: ActionFor<'LOAD_
 
   return {
     ...state,
-    availableIncentives: _.keyBy(incentives, 'id'),
+    availableIncentives: keyBy(incentives, 'id'),
   };
 }
 

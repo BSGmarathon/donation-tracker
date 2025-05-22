@@ -6,11 +6,11 @@ from django.urls import path, reverse
 import tracker.models
 from tracker import viewutil
 from tracker.admin.filters import InterviewParticipantFilter
-from tracker.admin.util import CustomModelAdmin, EventLockedMixin
+from tracker.admin.util import CustomModelAdmin, EventArchivedMixin
 
 
 @admin.register(tracker.models.Ad)
-class InterstitialAdmin(EventLockedMixin, CustomModelAdmin):
+class InterstitialAdmin(EventArchivedMixin, CustomModelAdmin):
     class Form(forms.ModelForm):
         run = forms.CharField(
             widget=forms.TextInput(attrs={'readonly': 'readonly'}),
@@ -80,6 +80,6 @@ def view_full_schedule(request, event=None):
     return HttpResponsePermanentRedirect(
         reverse(
             'admin:tracker_ui',
-            kwargs={'extra': 'schedule_editor' + f'/{event.id}' if event.id else ''},
+            kwargs={'extra': 'schedule_editor' + (f'/{event.id}' if event.id else '')},
         )
     )

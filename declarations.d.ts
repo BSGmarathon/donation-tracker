@@ -1,2 +1,3 @@
 declare module '*.css';
-declare module 'memoize-one';
+declare const TRACKER_DEBUG: boolean;
+declare const TRACKER_REDUX_LOGGING: boolean;

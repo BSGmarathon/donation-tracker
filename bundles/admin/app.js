@@ -10,6 +10,7 @@ import Spinner from '@public/spinner';
 
 import NotFound from '../public/notFound';
 import ScheduleEditor from './scheduleEditor';
+import TotalWatch from './totalWatch';
 
 const ProcessPendingBids = React.lazy(
   () => import('./donationProcessing/processPendingBids' /* webpackChunkName: 'donationProcessing' */),
@@ -23,7 +24,7 @@ function EventMenu(name) {
     (EventMenuComponents[name] = function EventMenuInner() {
       const { data: events, isLoading } = useEventsQuery();
       const sortedEvents = React.useMemo(
-        () => [...(events || [])].sort((a, b) => b.datetime.toSeconds() - a.datetime.toSeconds()),
+        () => (events ?? []).toSorted((a, b) => b.datetime.toSeconds() - a.datetime.toSeconds()),
         [events],
       );
 
@@ -35,7 +36,7 @@ function EventMenu(name) {
               sortedEvents.map(e => (
                 <li key={e.id}>
                   <Link to={`${e.id}`}>{e.short}</Link>
-                  {(!e.allow_donations || e.locked) && '🔒'}
+                  {e.archived && '🔒'}
                 </li>
               ))}
           </ul>
@@ -48,7 +49,7 @@ function EventMenu(name) {
 function DropdownMenu({ name, path }) {
   const { data: events } = useEventsQuery();
   const sortedEvents = React.useMemo(
-    () => [...(events || [])].sort((a, b) => b.datetime.toSeconds() - a.datetime.toSeconds()),
+    () => (events ?? []).toSorted((a, b) => b.datetime.toSeconds() - a.datetime.toSeconds()),
     [events],
   );
 
@@ -68,7 +69,7 @@ function DropdownMenu({ name, path }) {
             sortedEvents.map(e => (
               <li key={e.id}>
                 <Link to={`${path}/${e.id}`}>{e.short}</Link>
-                {(!e.allow_donations || e.locked) && '🔒'}
+                {e.archived && '🔒'}
               </li>
             ))}
         </ul>
@@ -130,6 +131,8 @@ function App({ rootPath }) {
                   </React.Suspense>
                 }
               />
+              <Route path="total_watch/" element={React.createElement(EventMenu('Total Watch'))} />
+              <Route path="total_watch/:eventId" element={<TotalWatch />} />
               {canViewBids && (
                 <Route path="process_pending_bids/" element={React.createElement(EventMenu('Process Pending Bids'))} />
               )}
