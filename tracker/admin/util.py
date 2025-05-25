@@ -197,7 +197,9 @@ class EventReadOnlyForm(ModelForm):
     def _get_validation_exclusions(self):
         # TODO: better way of making sure this doesn't get excluded?
         exclusions = super()._get_validation_exclusions()
-        exclusions.remove('event')
+        # Fix a weird but where event is not in this list during creation time
+        if 'event' in exclusions:
+            exclusions.remove('event')
         return exclusions
 
 
