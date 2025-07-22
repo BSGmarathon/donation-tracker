@@ -48,6 +48,7 @@ export function getFixtureEvent(overrides?: Omit<Partial<APIEvent>, ComputedFiel
     receiver_logo: 'https://example.com/logo.png',
     receiver_privacy_policy: 'https://example.com/privacy/',
     paypalcurrency: 'USD',
+    charity_split: 100,
     screening_mode: 'one_pass',
     allow_donations: true,
     archived: false,
