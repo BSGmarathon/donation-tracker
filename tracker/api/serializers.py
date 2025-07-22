@@ -933,6 +933,7 @@ class EventSerializer(PrimaryOrNaturalKeyLookup, TrackerModelSerializer):
             'donation_avg',
             'donation_med',
             'paypalcurrency',
+            'charity_split',
             'hashtag',
             'datetime',
             'timezone',
