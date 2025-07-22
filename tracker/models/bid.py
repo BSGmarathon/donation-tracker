@@ -74,6 +74,7 @@ class BidQuerySet(mptt.managers.TreeQuerySet):
             parent_name=F('parent__name'),
             speedrun_name=F('speedrun__name'),
             event_name=F('event__name'),
+            currency=F('event__paypalcurrency'),
         ).order_by(
             *Bid._meta.ordering
         )  # Django 3.x erases the default ordering after an annotate
@@ -100,6 +101,8 @@ class Bid(mptt.models.MPTTModel):
     HIDDEN_STATES = ('PENDING', 'DENIED', 'HIDDEN')
     PUBLIC_STATES = ('OPENED', 'CLOSED')
     ALL_STATES = HIDDEN_STATES + PUBLIC_STATES
+    TOP_LEVEL_STATES = ('HIDDEN', 'OPENED', 'CLOSED')
+    EXTRA_CHILD_STATES = ('PENDING', 'DENIED')  # only for allowuseroptions
 
     objects = BidManager.from_queryset(BidQuerySet)()
     event = models.ForeignKey(
@@ -265,7 +268,7 @@ class Bid(mptt.models.MPTTModel):
         order_insertion_by = ['name']
 
     def get_absolute_url(self):
-        return reverse('tracker:bid', args=(self.id,))
+        return util.build_public_url(reverse('tracker:bid', args=(self.id,)))
 
     def natural_key(self):
         return (
@@ -536,6 +539,7 @@ class Bid(mptt.models.MPTTModel):
             self.parent.save()
 
     def check_parent(self):
+        self.parent.refresh_from_db()
         changed = False
         if self.speedrun != self.parent.speedrun:
             self.speedrun = self.parent.speedrun
@@ -606,7 +610,7 @@ class Bid(mptt.models.MPTTModel):
             self.count = options['count']
 
     def full_label(self, addMoney=True):
-        result = [self.fullname()]
+        result = [self.full_name]
         if self.speedrun:
             result = [self.speedrun.name_with_category, ' : '] + result
         if addMoney:
@@ -616,16 +620,13 @@ class Bid(mptt.models.MPTTModel):
         return ''.join(result)
 
     def __str__(self):
+        parts = [f'{self.event} (Event)']
+        if self.speedrun:
+            parts.append(f'{self.speedrun.name_with_category} (Run)')
         if self.parent:
-            return f'{self.parent} (Parent) -- {self.name}'
-        elif self.speedrun:
-            return f'{self.speedrun.name_with_category} (Run) -- {self.name}'
-        else:
-            return f'{self.event} (Event) -- {self.name}'
-
-    def fullname(self):
-        parent = self.parent.fullname() + ' -- ' if self.parent else ''
-        return parent + self.name
+            parts.append(f'{self.parent.name} (Parent)')
+        parts.append(self.name)
+        return ' -- '.join(parts)
 
 
 class DonationBidQuerySet(models.QuerySet):
@@ -660,26 +661,10 @@ class DonationBid(models.Model):
             return
         if not self.bid.istarget:
             raise ValidationError('Target bid must be a leaf node')
-        self.donation.clean(self)
         if self.donation.event != self.bid.event:
             raise ValidationError(
                 'Target bid and target donation must be part of the same event'
             )
-        from .. import viewutil
-
-        bidsTree = (
-            viewutil.get_tree_queryset_all(Bid, [self.bid])
-            .select_related('parent')
-            .prefetch_related('options')
-        )
-        for bid in bidsTree:
-            if bid.state == 'OPENED' and bid.goal is not None and bid.goal <= bid.total:
-                bid.state = 'CLOSED'
-                if hasattr(bid, 'dependent_bids_set'):
-                    for dependentBid in bid.dependent_bids_set():
-                        if dependentBid.state == 'HIDDEN':
-                            dependentBid.state = 'OPENED'
-                            dependentBid.save()
 
     def save(self, *args, **kwargs):
         is_creating = self.pk is None
@@ -714,6 +699,22 @@ class DonationBid(models.Model):
                 else:
                     tasks.post_donation_to_postbacks(self.donation_id)
 
+        from .. import viewutil
+
+        bidsTree = (
+            viewutil.get_tree_queryset_all(Bid, [self.bid])
+            .select_related('parent')
+            .prefetch_related('options')
+        )
+        for bid in bidsTree:
+            if bid.state == 'OPENED' and bid.goal is not None and bid.goal <= bid.total:
+                bid.state = 'CLOSED'
+                if hasattr(bid, 'dependent_bids_set'):
+                    for dependentBid in bid.dependent_bids_set():
+                        if dependentBid.state == 'HIDDEN':
+                            dependentBid.state = 'OPENED'
+                            dependentBid.save()
+
     @property
     def speedrun(self):
         return self.bid.speedrun
@@ -737,10 +738,6 @@ class DonationBid(models.Model):
     @property
     def timereceived(self):
         return self.donation.timereceived
-
-    @property
-    def fullname(self):
-        return self.bid.fullname()
 
     def __str__(self):
         return str(self.bid) + ' -- ' + str(self.donation)

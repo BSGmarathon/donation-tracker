@@ -235,7 +235,7 @@ class TestDonation(TestCase):
             models.Donation.objects.filter(id=completed_donation.id),
         )
 
-        self.event.use_one_step_screening = False
+        self.event.screening_mode = 'two_pass'
         self.event.save()
         completed_donation.refresh_from_db()
         completed_donation.commentstate = 'APPROVED'
@@ -473,7 +473,7 @@ class TestDonationAdmin(TestCase, AssertionHelpers):
                 'readstate', form.base_fields, msg='Field is editable when not READY'
             )
 
-            self.event.use_one_step_screening = False
+            self.event.screening_mode = 'two_pass'
             self.event.save()
             self.donation.refresh_from_db()
             self.donation.readstate = 'READY'
@@ -590,7 +590,7 @@ class TestDonationAdmin(TestCase, AssertionHelpers):
         self.assertIn(self.donation, ipn.donation.all())
 
 
-class TestDonationViews(TestCase):
+class TestDonationViews(TestCase, AssertionHelpers):
     def setUp(self):
         self.super_user = User.objects.create_superuser(
             'admin', 'admin@example.com', 'password'
@@ -599,7 +599,10 @@ class TestDonationViews(TestCase):
             short='ev1', name='Event 1', datetime=today_noon
         )
         self.other_event = models.Event.objects.create(
-            short='ev2', name='Event 2', datetime=tomorrow_noon
+            short='ev2',
+            name='Event 2',
+            datetime=tomorrow_noon,
+            paypalcurrency='EUR',
         )
         self.draft_event = models.Event.objects.create(
             short='ev3',
@@ -638,7 +641,12 @@ class TestDonationViews(TestCase):
         resp = self.client.get(reverse('tracker:donationindex'))
         self.assertContains(
             resp,
-            '<small>Total (Count): $45.00 (3) &mdash; Max/Avg/Median Donation: $25.00/$15.00/$15.00</small>',
+            '<small>Donation Total (USD): $20.00 (2) &mdash; Max/Avg/Median Donation: $15.00/$10.00/$10.00</small>',
+            html=True,
+        )
+        self.assertContains(
+            resp,
+            '<small>Donation Total (EUR): €25.00 (1) &mdash; Max/Avg/Median Donation: €25.00/€25.00/€25.00</small>',
             html=True,
         )
         self.assertContains(resp, self.regular_donation.visible_donor_name)
@@ -651,18 +659,22 @@ class TestDonationViews(TestCase):
         resp = self.client.get(reverse('tracker:donationindex', args=(self.event.id,)))
         self.assertContains(
             resp,
-            '<small>Total (Count): $20.00 (2) &mdash; Max/Avg/Median Donation: $15.00/$10.00/$10.00</small>',
+            '<small>Donation Total: $20.00 (2) &mdash; Max/Avg/Median Donation: $15.00/$10.00/$10.00</small>',
             html=True,
         )
         self.assertContains(resp, self.regular_donation.visible_donor_name)
+        self.assertContainsUrl(resp, self.regular_donation.get_absolute_url())
         # self.assertContains(
         #     resp,
         #     self.regular_donor.cache_for(self.event.id).get_absolute_url(),
         # )
         self.assertContains(resp, self.anonymous_donation.visible_donor_name)
+        self.assertContainsUrl(resp, self.anonymous_donation.get_absolute_url())
         # self.assertNotContains(
         #     resp, self.anonymous_donor.cache_for(self.event.id).get_absolute_url()
         # )
+        self.assertNotContainsUrl(resp, self.other_donation.get_absolute_url())
+        self.assertNotContainsUrl(resp, self.pending_donation.get_absolute_url())
         self.assertNotContains(resp, 'Invalid Variable')
 
         resp = self.client.get(

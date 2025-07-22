@@ -1,12 +1,12 @@
 import React from 'react';
-import classNames from 'classnames';
+import cn from 'classnames';
 import { useNavigate } from 'react-router';
 
 import { useEventFromRoute, useRunsQuery, useSplitRuns } from '@public/apiv2/hooks';
 import { Prize } from '@public/apiv2/Models';
 import { useBooleanState } from '@public/hooks/useBooleanState';
 import { useNow } from '@public/hooks/useNow';
-import * as CurrencyUtils from '@public/util/currency';
+import { useEventCurrency } from '@public/util/currency';
 import Button from '@uikit/Button';
 import Clickable from '@uikit/Clickable';
 import Header from '@uikit/Header';
@@ -21,12 +21,10 @@ import styles from './PrizeCard.mod.css';
 
 type PrizeCardProps = {
   prize: Prize;
-  currency: string;
-  className?: string;
+  className?: cn.Argument;
 };
 
-const PrizeCard = (props: PrizeCardProps) => {
-  const { prize, className, currency } = props;
+const PrizeCard = ({ className, prize }: PrizeCardProps) => {
   const now = useNow();
   const navigate = useNavigate();
 
@@ -43,8 +41,10 @@ const PrizeCard = (props: PrizeCardProps) => {
   const [imageError, setImageErrorTrue] = useBooleanState();
   const coverImage = imageError ? null : PrizeUtils.getSummaryImage(prize);
 
+  const eventCurrency = useEventCurrency();
+
   return (
-    <Clickable className={classNames(styles.card, className)} onClick={handleViewPrize}>
+    <Clickable className={cn(styles.card, className)} onClick={handleViewPrize}>
       <div className={styles.imageWrap}>
         {coverImage != null ? (
           <img alt={prize.name} onError={setImageErrorTrue} className={styles.coverImage} src={coverImage} />
@@ -76,7 +76,7 @@ const PrizeCard = (props: PrizeCardProps) => {
           </Text>
         ) : null}
         <Text className={styles.minimumDonation} color={Text.Colors.MUTED} size={Text.Sizes.SIZE_12} marginless>
-          <strong>{CurrencyUtils.asCurrency(prize.minimumbid, { currency })}</strong>
+          <strong>{eventCurrency(prize.minimumbid)}</strong>
           <br />
           {prize.sumdonations ? 'Total Donations' : 'Minimum Donation'}
         </Text>

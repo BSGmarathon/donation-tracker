@@ -6,6 +6,7 @@ import zoneinfo
 
 import post_office.models
 from django.contrib.auth.models import Group, Permission, User
+from django.contrib.sites.models import Site
 from django.test import TestCase, TransactionTestCase, override_settings
 
 from tracker import models, settings
@@ -40,7 +41,48 @@ class TestEvent(TestCase):
         self.run.refresh_from_db()
         self.assertEqual(self.run.starttime, self.event.datetime)
 
-    def test_approve_flagged_donations_with_one_step(self):
+    def test_mark_ready_to_read_with_host_only(self):
+        self.event.screening_mode = 'two_pass'
+        self.event.save()
+
+        donation = randgen.generate_donation(self.rand, readstate='FLAGGED')
+        donation.save()
+
+        other_donation = randgen.generate_donation(self.rand, readstate='PENDING')
+        other_donation.save()
+
+        self.event.screening_mode = 'host_only'
+        self.event.save()
+
+        donation.refresh_from_db()
+        self.assertEqual(
+            donation.readstate,
+            'READY',
+            msg='Donation did not fix readstate when event modified',
+        )
+
+        other_donation.refresh_from_db()
+        self.assertEqual(
+            other_donation.readstate,
+            'READY',
+            msg='Donation did not fix readstate when event modified',
+        )
+
+        donation.readstate = 'FLAGGED'
+        donation.save()
+
+        self.assertEqual(
+            donation.readstate, 'READY', msg='Donation did not fix readstate when saved'
+        )
+
+        donation.readstate = 'PENDING'
+        donation.save()
+
+        self.assertEqual(
+            donation.readstate, 'READY', msg='Donation did not fix readstate when saved'
+        )
+
+    def test_approve_flagged_donations_with_one_pass(self):
         donation = randgen.generate_donation(self.rand, readstate='FLAGGED')
         donation.save()
 
@@ -48,7 +90,7 @@ class TestEvent(TestCase):
             donation.readstate, 'READY', msg='Donation did not fix readstate when saved'
         )
 
-        self.event.use_one_step_screening = False
+        self.event.screening_mode = 'two_pass'
         self.event.save()
 
         # neither side of this interaction should change from FLAGGED to READY
@@ -64,7 +106,7 @@ class TestEvent(TestCase):
             msg='Donation should not have fixed readstate when saved',
         )
 
-        self.event.use_one_step_screening = True
+        self.event.screening_mode = 'one_pass'
         self.event.save()
 
         donation.refresh_from_db()
@@ -217,38 +259,109 @@ class TestEventManager(TransactionTestCase):
         )
         self.manager = models.Event.objects
 
-    def test_donation_count_annotation(self):
-        manager = models.Event.objects.with_annotations()
-        event = manager.get(pk=self.event.pk)
-        self.assertEqual(event.donation_count, len(self.completed_donations))
-
-    def test_amount_annotation(self):
-        manager = models.Event.objects.with_annotations()
-        event = manager.get(pk=self.event.pk)
-        total_amount = sum(donation.amount for donation in self.completed_donations)
-        self.assertAlmostEqual(event.amount, total_amount)
-
 
 class TestEventViews(TransactionTestCase):
     def setUp(self):
         self.event = models.Event.objects.create(
             datetime=today_noon, short='short', name='Short'
         )
+        self.eu_event = models.Event.objects.create(
+            datetime=today_noon,
+            short='eu',
+            name='EU',
+            paypalcurrency='EUR',
+        )
+        donor = models.Donor.objects.create()
+        models.Donation.objects.create(
+            event=self.event, amount=5, transactionstate='COMPLETED', donor=donor
+        )
+        models.Donation.objects.create(
+            event=self.event, amount=10, transactionstate='COMPLETED', donor=donor
+        )
+        models.Donation.objects.create(
+            event=self.event, amount=60, transactionstate='COMPLETED', donor=donor
+        )
+        models.Donation.objects.create(
+            event=self.eu_event, amount=25, transactionstate='COMPLETED', donor=donor
+        )
+        models.Donation.objects.create(
+            event=self.eu_event, amount=10, transactionstate='COMPLETED', donor=donor
+        )
+        models.SpeedRun.objects.create(
+            event=self.event,
+            order=1,
+            run_time='5:00',
+        )
+        models.Bid.objects.create(
+            event=self.event,
+            istarget=True,
+            name='Test Bid',
+            goal=50,
+        )
+        models.Milestone.objects.create(
+            event=self.event,
+            amount=1000,
+            name='Test Milestone',
+            visible=True,
+        )
+        models.Prize.objects.create(
+            event=self.event,
+            minimumbid=5,
+            name='Test Prize',
+            state='ACCEPTED',
+            acceptemailsent=True,
+        )
 
     @override_settings(TRACKER_LOGO='example-logo.png')
     def test_main_index(self):
-        models.Donation.objects.create(
-            event=self.event, amount=5, transactionstate='COMPLETED'
-        )
-        models.Donation.objects.create(
-            event=self.event, amount=10, transactionstate='COMPLETED'
-        )
         response = self.client.get(reverse('tracker:index_all'))
         self.assertContains(response, 'All Events')
         self.assertContains(response, 'example-logo.png')
-        self.assertContains(response, '$15.00 (2)', 1)
-        self.assertContains(response, '$10.00', 1)
-        self.assertContains(response, '$7.50', 2)
+        self.assertContains(
+            response,
+            'Donation Total (USD): $75.00 (3) &mdash; Max/Avg/Median Donation: $60.00/$25.00/$10.00',
+            html=True,
+        )
+        self.assertContains(
+            response,
+            'Donation Total (EUR): €35.00 (2) &mdash; Max/Avg/Median Donation: €25.00/€17.50/€17.50',
+            html=True,
+        )
+        self.assertContains(response, 'View Runs (1)', html=True)
+        self.assertContains(response, 'View Prizes (1)', html=True)
+        self.assertContains(response, 'View Bids (1)', html=True)
+        self.assertContains(response, 'View Milestones (1)', html=True)
+        self.assertContains(response, 'View Donations (5)', html=True)
+
+    @override_settings(TRACKER_LOGO='example-logo.png')
+    def test_event_detail(self):
+        response = self.client.get(reverse('tracker:index', args=(self.event.id,)))
+        self.assertContains(response, self.event.name)
+        self.assertContains(response, 'example-logo.png')
+        self.assertContains(
+            response,
+            'Donation Total: $75.00 (3) &mdash; Max/Avg/Median Donation: $60.00/$25.00/$10.00',
+            html=True,
+        )
+        self.assertContains(response, 'View Runs (1)', html=True)
+        self.assertContains(response, 'View Prizes (1)', html=True)
+        self.assertContains(response, 'View Bids (1)', html=True)
+        self.assertContains(response, 'View Milestones (1)', html=True)
+        self.assertContains(response, 'View Donations (3)', html=True)
+
+        response = self.client.get(reverse('tracker:index', args=(self.eu_event.id,)))
+        self.assertContains(response, self.eu_event.name)
+        self.assertContains(response, 'example-logo.png')
+        self.assertContains(
+            response,
+            'Donation Total: €35.00 (2) &mdash; Max/Avg/Median Donation: €25.00/€17.50/€17.50',
+            html=True,
+        )
+        self.assertContains(response, 'View Runs (0)', html=True)
+        self.assertContains(response, 'View Prizes (0)', html=True)
+        self.assertContains(response, 'View Bids (0)', html=True)
+        self.assertContains(response, 'View Milestones (0)', html=True)
+        self.assertContains(response, 'View Donations (2)', html=True)
 
     def test_json(self):
         response = self.client.get(reverse('tracker:index_all'), data={'json': ''})
@@ -289,25 +402,41 @@ class TestEventAdmin(TestCase):
         )
         self.rand = random.Random(None)
         self.client.force_login(self.super_user)
+        Site.objects.create(domain='testserver', name='Test Server')
 
     def test_event_admin(self):
         response = self.client.get(reverse('admin:tracker_event_changelist'))
         self.assertEqual(response.status_code, 200)
-        response = self.client.get(reverse('admin:tracker_event_add'))
-        self.assertEqual(response.status_code, 200)
+        prize_coordinator = User.objects.create(username='prize_coordinator')
+        with override_settings(
+            TRACKER_DEFAULT_PRIZE_COORDINATOR=prize_coordinator.username
+        ):
+            response = self.client.get(reverse('admin:tracker_event_add'))
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(
+                response.context['adminform'].fields['prizecoordinator'].initial,
+                prize_coordinator.id,
+            )
+        # test an invalid setting
+        with override_settings(TRACKER_DEFAULT_PRIZE_COORDINATOR='foobar'):
+            response = self.client.get(reverse('admin:tracker_event_add'))
+            self.assertEqual(response.status_code, 200)
+            self.assertIsNone(
+                response.context['adminform'].fields['prizecoordinator'].initial
+            )
         response = self.client.get(
             reverse('admin:tracker_event_change', args=(self.event.id,))
         )
         self.assertEqual(response.status_code, 200)
 
     def test_security(self):
-        self.staff = User.objects.create(username='staff', is_staff=True)
-        self.client.force_login(self.staff)
+        staff = User.objects.create(username='staff', is_staff=True)
+        self.client.force_login(staff)
         response = self.client.get(
             reverse('admin:send_volunteer_emails', args=(self.event.id,))
         )
         self.assertEqual(response.status_code, 403)
-        self.staff.user_permissions.add(
+        staff.user_permissions.add(
             Permission.objects.get(name='Can change user'),
         )
         response = self.client.get(

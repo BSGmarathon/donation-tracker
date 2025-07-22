@@ -5,6 +5,7 @@ import { useConstants } from '@common/Constants';
 import APIErrorList from '@public/APIErrorList';
 import { useEventFromRoute, usePrizesQuery, useRunsQuery } from '@public/apiv2/hooks';
 import { comparePrize, Prize } from '@public/apiv2/Models';
+import EventTitle from '@public/EventTitle';
 import { useNow } from '@public/hooks/useNow';
 import Anchor from '@uikit/Anchor';
 import Container from '@uikit/Container';
@@ -24,11 +25,10 @@ import styles from './Prizes.mod.css';
 type PrizeGridProps = {
   prizes: Prize[];
   name: string;
-  currency: string;
 };
 
 const PrizeGrid = (props: PrizeGridProps) => {
-  const { prizes, name, currency } = props;
+  const { prizes, name } = props;
 
   return (
     <section className={styles.section}>
@@ -37,7 +37,7 @@ const PrizeGrid = (props: PrizeGridProps) => {
       </Header>
       <div className={styles.grid}>
         {prizes.map(prize => (
-          <PrizeCard key={prize.id} currency={currency} prize={prize} />
+          <PrizeCard key={prize.id} prize={prize} />
         ))}
       </div>
     </section>
@@ -76,6 +76,7 @@ const Prizes = () => {
 
   return (
     <Container size={Container.Sizes.WIDE}>
+      <EventTitle>Prizes</EventTitle>
       <APIErrorList errors={[eventError, prizesError, runsError]}>
         {eventLoading ? (
           <div className={styles.loadingDots}>
@@ -103,11 +104,11 @@ const Prizes = () => {
                 <>
                   {closingPrizes.length > 0 && (
                     <>
-                      <PrizeGrid prizes={closingPrizes} currency={event.paypalcurrency} name="Closing Soon!" />
+                      <PrizeGrid prizes={closingPrizes} name="Closing Soon!" />
                       <hr className={styles.divider} />
                     </>
                   )}
-                  {prizes && <PrizeGrid prizes={prizes} currency={event.paypalcurrency} name="All Prizes" />}
+                  {prizes && <PrizeGrid prizes={prizes} name="All Prizes" />}
                 </>
               )}
             </>

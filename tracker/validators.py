@@ -1,10 +1,5 @@
+import babel.localedata
 from django.core.exceptions import ValidationError
-
-__all__ = [
-    'positive',
-    'nonzero',
-    'max_100',
-]
 
 
 def max_100(value):
@@ -31,3 +26,11 @@ def runners_exists(runners):
             Talent.objects.get_by_natural_key(r.strip())
         except Talent.DoesNotExist:
             raise ValidationError('Runner not found: "%s"' % r.strip())
+
+
+def validate_locale(name: str):
+    name = name.strip()
+    if name:
+        name = babel.localedata.normalize_locale(name.replace('-', '_')) or name
+        if not babel.localedata.exists(name):
+            raise ValidationError(f'Unknown locale `{name}`')

@@ -1,5 +1,6 @@
 from django.contrib.auth import get_user_model
 from django.contrib.auth.tokens import default_token_generator
+from django.contrib.sites.models import Site
 from django.test import RequestFactory, TestCase, TransactionTestCase, override_settings
 from django.urls import reverse
 
@@ -19,10 +20,11 @@ class TestMergeObjectsForm(TestCase):
         self.assertEqual(form.choices[0][1], '#%d: Justin' % d1.pk)
 
 
-@override_settings(EMAIL_FROM_USER='example@example.com')
+@override_settings(TRACKER_REGISTRATION_FROM_EMAIL='example@example.com')
 class TestRegistrationForm(TransactionTestCase):
     def setUp(self):
         self.factory = RequestFactory()
+        Site.objects.create(domain='testserver', name='Test Server')
 
     def run_registration(self, email):
         regForm = tracker.forms.RegistrationForm(

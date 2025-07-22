@@ -13,12 +13,13 @@ import tracker.models.tag
 from tracker import settings
 
 from . import randgen
-from .util import MigrationsTestCase, today_noon
+from .util import AssertionModelHelpers, MigrationsTestCase, today_noon
 
 
 class TestSpeedRunBase(TransactionTestCase):
     def setUp(self):
         super().setUp()
+        self.rand = random.Random()
         if not hasattr(self, 'event'):
             self.event = models.Event.objects.create(datetime=today_noon)
         self.run1 = models.SpeedRun.objects.create(
@@ -170,8 +171,47 @@ class TestSpeedRun(TestSpeedRunBase):
             self.run1.save()
             self.assertSetEqual(set(self.run1.tags.all()), {self.tag1, self.tag2})
 
+    def test_prize_attachments(self):
+        spanned_prize = randgen.generate_prize(
+            self.rand, start_run=self.run2, end_run=self.run3
+        )
+        spanned_prize.save()
+        single_prize = randgen.generate_prize(
+            self.rand, start_run=self.run1, end_run=self.run1
+        )
+        single_prize.save()
+        with self.subTest('cannot remove order from a run with prizes attached'):
+            with self.assertRaises(ValidationError):
+                self.run1.order = None
+                self.run1.clean()
+            self.run1.refresh_from_db()
+            with self.assertRaises(ValidationError):
+                self.run2.order = None
+                self.run2.clean()
+            self.run2.refresh_from_db()
+            with self.assertRaises(ValidationError):
+                self.run3.order = None
+                self.run3.clean()
+            self.run3.refresh_from_db()
+        with self.subTest('cannot reorder a run if it would invert prize span'):
+            with self.assertRaises(ValidationError):
+                self.run2.order = self.run3.order + 1
+                self.run2.clean()
+            self.run2.refresh_from_db()
+            with self.assertRaises(ValidationError):
+                self.run3.order = self.run2.order - 1
+                self.run3.clean()
+            self.run3.refresh_from_db()
+        with self.subTest('can reorder when prize spans are still ok'):
+            self.run1.order = self.run2.order
+            self.run1.clean()
+            self.run1.refresh_from_db()
+            self.run2.order = self.run1.order
+            self.run2.clean()
+            self.run2.refresh_from_db()
 
-class TestSpeedRunAdmin(TransactionTestCase):
+
+class TestSpeedRunAdmin(TransactionTestCase, AssertionModelHelpers):
     def setUp(self):
         self.event1 = models.Event.objects.create(
             datetime=today_noon,
@@ -212,7 +252,7 @@ class TestSpeedRunAdmin(TransactionTestCase):
         from tracker.admin.forms import StartRunForm
 
         self.client.login(username='admin', password='password')
-        with self.subTest('normal run'):
+        with self.subTest('normal run'), self.assertLogsChanges(1):
             cf = f'event__id__exact={self.event1.pk}'
             resp = self.client.post(
                 reverse('admin:start_run', args=(self.run2.id,)),
@@ -242,9 +282,11 @@ class TestSpeedRunAdmin(TransactionTestCase):
             )
             self.assertEqual(resp.status_code, 200)
             self.assertFormError(
-                resp.context['form'], None, StartRunForm.Errors.anchor_time_drift
+                resp.context['form'],
+                'start_time',
+                StartRunForm.Errors.anchor_time_drift,
             )
-        with self.subTest('anchored run'):
+        with self.subTest('anchored run'), self.assertLogsChanges(2):
             resp = self.client.post(
                 reverse('admin:start_run', args=(self.run3.id,)),
                 data={
@@ -278,23 +320,7 @@ class TestSpeedRunAdmin(TransactionTestCase):
             },
         )
         self.assertFalse(form.is_valid())
-        self.assertFormError(form, None, StartRunForm.Errors.invalid_start_time)
-
-    def test_anchor_drift(self):
-        from tracker.admin.forms import StartRunForm
-
-        form = StartRunForm(
-            initial={
-                'run_id': self.run2.id,
-            },
-            data={
-                'run_time': '0:41:20',
-                'start_time': '%s 13:21:00' % self.event1.date,
-                'run_id': self.run2.id,
-            },
-        )
-        self.assertFalse(form.is_valid())
-        self.assertFormError(form, None, StartRunForm.Errors.anchor_time_drift)
+        self.assertFormError(form, 'start_time', StartRunForm.Errors.invalid_start_time)
 
 
 class TestSpeedrunList(TransactionTestCase):

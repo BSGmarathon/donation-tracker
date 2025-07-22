@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import contextlib
 import csv
 import datetime
@@ -13,12 +15,14 @@ import re
 import sys
 import time
 import unittest
+import urllib.parse
 import zoneinfo
 from collections import defaultdict
 from decimal import Decimal
-from typing import Iterable
+from typing import Iterable, Optional
 
 import msgpack
+import post_office.models
 from django.contrib.admin.models import LogEntry
 from django.contrib.auth.models import AnonymousUser, Permission, User
 from django.contrib.staticfiles.testing import StaticLiveServerTestCase
@@ -65,10 +69,31 @@ class PickledRandom(random.Random):
         pass
 
 
-def parse_test_mail(mail):
+def create_test_template(subject, keys, collection_keys=None, extra=''):
+    content_parts = []
+    if keys:
+        content_parts.append('\n'.join(f'{key}: {{{{{key}}}}}' for key in keys))
+    if collection_keys:
+        content_parts.append(
+            '\n'.join(
+                f'{{% for a in {key} %}}{key}: {{{{a}}}}\n{{% endfor %}}'
+                for key in collection_keys
+            )
+        )
+    if extra:
+        content_parts.append(extra)
+    return post_office.models.EmailTemplate.objects.create(
+        name='_'.join(keys)[:255],
+        subject=subject,
+        content='\n'.join(content_parts),
+    )
+
+
+def parse_test_mail(mail: post_office.models.Email | str):
+    mail = getattr(mail, 'message', mail)
     lines = [
         x.partition(':')
-        for x in [x for x in [x.strip() for x in mail.message.split('\n')] if x]
+        for x in [x for x in [x.strip() for x in mail.split('\n')] if x]
     ]
     result = {}
     for line in lines:
@@ -77,7 +102,7 @@ def parse_test_mail(mail):
             value = line[2]
             if name not in result:
                 result[name] = []
-            result[name].append(value)
+            result[name].append(value.strip())
     return result
 
 
@@ -92,8 +117,8 @@ def parse_csv_response(response):
 
 
 def create_ipn(
-    donation,
-    email,
+    donation: models.Donation,
+    email: str,
     *,
     residence_country='US',
     custom=None,
@@ -107,7 +132,10 @@ def create_ipn(
 ):
     mc_fee = mc_fee if mc_fee is not None else donation.amount * Decimal('0.03')
     mc_gross = mc_gross if mc_gross is not None else donation.amount
-    custom = custom if custom is not None else f'{donation.id}:{donation.domainId}'
+    if payment_status.lower == 'canceled_reversal':
+        # these come back with the mc_gross field adjusted
+        mc_gross -= mc_fee
+    custom = custom if custom is not None else donation.paypal_signature
     payment_date = (
         payment_date
         if payment_date is not None
@@ -125,8 +153,23 @@ def create_ipn(
         txn_id=txn_id,
         **kwargs,
     )
+    ipn.refresh_from_db()
     ipn.send_signals()
     return ipn
+
+
+def find_admin_inline(response, InlineType):
+    inlines = getattr(response, 'context', {}).get('inline_admin_formsets', [])
+    return next((fs for fs in inlines if isinstance(fs.opts, InlineType)), None)
+
+
+# not used in tests, but useful for debugging
+def merge_response_context(response):
+    context = {}
+    for c in getattr(response, 'context', []):
+        for d in c.dicts:
+            context.update(**d)
+    return context
 
 
 noon = datetime.time(12, 0)
@@ -239,21 +282,22 @@ class TestRemoveNullsMigrations(MigrationsTestCase):
         # get the pre-migrate state of the model structure
         Prize = apps.get_model('tracker', 'Prize')
         Event = apps.get_model('tracker', 'Event')
-        self.event = Event.objects.create(
+        event = Event.objects.create(
             short='test', name='Test Event', datetime=today_noon
         )
-        self.prize1 = Prize.objects.create(event=self.event, name='Test Prize')
+        # if you need the model in the tests, save the id, not the model itself,
+        #  as the class structure may not be the same
+        self.prize1_id = Prize.objects.create(event=event, name='Test Prize').id
 
     def test_nulls_removed(self):
         # get the post-migrate state of the model structure
         Prize = self.apps.get_model('tracker', 'Prize')
 
-        # because the structure may have changed, need to refetch
-        self.prize1 = Prize.objects.get(id=self.prize1.id)
-        self.assertEqual(self.prize1.altimage, '')
-        self.assertEqual(self.prize1.description, '')
-        self.assertEqual(self.prize1.extrainfo, '')
-        self.assertEqual(self.prize1.image, '')
+        prize = Prize.objects.get(id=self.prize1_id)
+        self.assertEqual(prize.altimage, '')
+        self.assertEqual(prize.description, '')
+        self.assertEqual(prize.extrainfo, '')
+        self.assertEqual(prize.image, '')
 
 
 class TestErrorCheckMigration(MigrationsTestCase):
@@ -293,6 +337,11 @@ class TestErrorCheckMigration(MigrationsTestCase):
 
 
 class AssertionHelpers:
+    def assertMessages(self, response, messages):
+        self.assertSetEqual(
+            {str(m) for m in response.wsgi_request._messages}, set(messages)
+        )
+
     def assertDictContainsSubset(self, subset, dictionary, msg=None):
         if sys.version_info < (3, 12):
             super().assertDictContainsSubset(subset, dictionary, msg)
@@ -304,6 +353,26 @@ class AssertionHelpers:
 
     def assertSubset(self, sub, sup, msg=None):
         self.assertSetEqual(set(sub) & set(sup), set(sub), msg)
+
+    def assertContainsUrl(
+        self, resp, url: str, count: Optional[int] = None, msg_prefix=''
+    ):
+        """tries both the passed url, and if the url is absolute, tries the relative version as well"""
+        try:
+            self.assertContains(resp, url, count=count, msg_prefix=msg_prefix)
+        except AssertionError:
+            split = urllib.parse.urlsplit(url)
+            if split.netloc:
+                url = urllib.parse.urlunsplit(('', '', *urllib.parse.urlsplit(url)[2:]))
+                self.assertContains(resp, url, count=count, msg_prefix=msg_prefix)
+
+    def assertNotContainsUrl(self, resp, url: str, msg_prefix=''):
+        """tries both the passed url, and if the url is absolute, tries the relative version as well"""
+        self.assertNotContains(resp, url, msg_prefix=msg_prefix)
+        split = urllib.parse.urlsplit(url)
+        if split.netloc:
+            url = urllib.parse.urlunsplit(('', '', *split[2:]))
+            self.assertNotContains(resp, url, msg_prefix=msg_prefix)
 
 
 class AssertionModelHelpers:
@@ -331,6 +400,24 @@ class AssertionModelHelpers:
             before + number,
             after,
             msg=f'Expected {number} change(s) logged, got {after - before}',
+        )
+
+    @contextlib.contextmanager
+    def assertTrackerLogs(self, number, category=None, msg=None):
+        q = models.Log.objects
+        if category:
+            q = q.filter(category=category)
+        before = q.count()
+        yield
+        after = q.count()
+        parts = []
+        if msg:
+            parts.append(msg)
+        parts.append(f'Expected {number} log messages, got {after - before}')
+        self.assertEqual(
+            before + number,
+            after,
+            msg='\n'.join(parts),
         )
 
 
@@ -378,7 +465,9 @@ class APITestCase(TransactionTestCase, AssertionHelpers, AssertionModelHelpers):
         paginator.paginate_queryset(queryset, FakeRequest())
         return paginator.get_paginated_response(data)
 
-    def _get_viewname(self, model_name, action, **kwargs):
+    def _get_viewname(self, model_name, action, view_name=None, **kwargs):
+        if view_name:
+            return f'tracker:api_v2:{model_name}-{view_name}'
         if 'event_pk' in kwargs:
             if 'feed' in kwargs:
                 viewname = f'tracker:api_v2:event-{model_name}-feed-{action}'
@@ -466,6 +555,7 @@ class APITestCase(TransactionTestCase, AssertionHelpers, AssertionModelHelpers):
     def get_detail(
         self,
         obj,
+        /,
         *,
         model_name=None,
         status_code=200,
@@ -473,6 +563,7 @@ class APITestCase(TransactionTestCase, AssertionHelpers, AssertionModelHelpers):
         kwargs=None,
         user=_empty,
         expected_error_codes=None,
+        view_name=None,
     ):
         kwargs = kwargs or {}
         if user is not _empty:
@@ -484,7 +575,7 @@ class APITestCase(TransactionTestCase, AssertionHelpers, AssertionModelHelpers):
             pk = obj if isinstance(obj, int) else obj.pk
             lookup_kwargs['pk'] = pk
         url = reverse(
-            self._get_viewname(model_name, 'detail', **kwargs),
+            self._get_viewname(model_name, 'detail', view_name, **kwargs),
             kwargs=lookup_kwargs,
         )
 
@@ -508,6 +599,7 @@ class APITestCase(TransactionTestCase, AssertionHelpers, AssertionModelHelpers):
         kwargs=None,
         user=_empty,
         expected_error_codes=None,
+        view_name=None,
     ):
         kwargs = kwargs or {}
         if user is not _empty:
@@ -515,7 +607,7 @@ class APITestCase(TransactionTestCase, AssertionHelpers, AssertionModelHelpers):
         model_name = model_name or self.model_name
         assert model_name is not None
         url = reverse(
-            self._get_viewname(model_name, 'list', **kwargs),
+            self._get_viewname(model_name, 'list', view_name, **kwargs),
             kwargs=kwargs,
         )
         with self.process_snapshot('GET', url, data) as snapshot:
@@ -533,6 +625,7 @@ class APITestCase(TransactionTestCase, AssertionHelpers, AssertionModelHelpers):
         self,
         noun,
         obj=None,
+        /,
         *,
         model_name=None,
         status_code=200,
@@ -541,6 +634,7 @@ class APITestCase(TransactionTestCase, AssertionHelpers, AssertionModelHelpers):
         lookup_key=None,
         user=_empty,
         expected_error_codes=None,
+        view_name=None,
     ):
         kwargs = kwargs or {}
         if lookup_key is None:
@@ -551,7 +645,9 @@ class APITestCase(TransactionTestCase, AssertionHelpers, AssertionModelHelpers):
             self.client.force_authenticate(user=user)
         model_name = model_name or self.model_name
         assert model_name is not None
-        url = reverse(self._get_viewname(model_name, noun, **kwargs), kwargs=kwargs)
+        url = reverse(
+            self._get_viewname(model_name, noun, view_name, **kwargs), kwargs=kwargs
+        )
         with self.process_snapshot('GET', url, data) as snapshot:
             response = self.client.get(
                 url,
@@ -572,6 +668,7 @@ class APITestCase(TransactionTestCase, AssertionHelpers, AssertionModelHelpers):
         kwargs=None,
         expected_error_codes=None,
         user=_empty,
+        view_name=None,
     ):
         return self.post_noun(
             'list',
@@ -581,11 +678,13 @@ class APITestCase(TransactionTestCase, AssertionHelpers, AssertionModelHelpers):
             kwargs=kwargs,
             expected_error_codes=expected_error_codes,
             user=user,
+            view_name=view_name,
         )
 
     def post_noun(
         self,
         noun,
+        /,
         *,
         model_name=None,
         status_code=200,
@@ -593,6 +692,7 @@ class APITestCase(TransactionTestCase, AssertionHelpers, AssertionModelHelpers):
         kwargs=None,
         expected_error_codes=None,
         user=_empty,
+        view_name=None,
     ):
         kwargs = kwargs or {}
         data = data or {}
@@ -600,7 +700,9 @@ class APITestCase(TransactionTestCase, AssertionHelpers, AssertionModelHelpers):
             self.client.force_authenticate(user=user)
         model_name = model_name or self.model_name
         assert model_name is not None
-        url = reverse(self._get_viewname(model_name, noun, **kwargs), kwargs=kwargs)
+        url = reverse(
+            self._get_viewname(model_name, noun, view_name, **kwargs), kwargs=kwargs
+        )
         with self.process_snapshot('POST', url, data) as snapshot:
             response = self.client.post(
                 url,
@@ -616,6 +718,7 @@ class APITestCase(TransactionTestCase, AssertionHelpers, AssertionModelHelpers):
     def patch_detail(
         self,
         obj,
+        /,
         *,
         model_name=None,
         status_code=200,
@@ -623,28 +726,33 @@ class APITestCase(TransactionTestCase, AssertionHelpers, AssertionModelHelpers):
         data=None,
         kwargs=None,
         user=_empty,
+        view_name=None,
     ):
         return self.patch_noun(
             obj,
+            'detail',
             model_name=model_name,
             status_code=status_code,
             expected_error_codes=expected_error_codes,
             data=data,
             kwargs=kwargs,
             user=user,
+            view_name=view_name,
         )
 
     def patch_noun(
         self,
         obj,
+        noun,
+        /,
         *,
         model_name=None,
-        noun='detail',
         status_code=200,
         expected_error_codes=None,
         data=None,
         kwargs=None,
         user=_empty,
+        view_name=None,
     ):
         kwargs = kwargs or {}
         if user is not _empty:
@@ -652,7 +760,7 @@ class APITestCase(TransactionTestCase, AssertionHelpers, AssertionModelHelpers):
         model_name = model_name or self.model_name
         assert model_name is not None
         url = reverse(
-            self._get_viewname(model_name, noun, **kwargs),
+            self._get_viewname(model_name, noun, view_name, **kwargs),
             kwargs={'pk': obj.pk, **kwargs},
         )
         if status_code >= 400 and not expected_error_codes:
@@ -674,9 +782,10 @@ class APITestCase(TransactionTestCase, AssertionHelpers, AssertionModelHelpers):
     def delete_noun(
         self,
         obj,
+        noun='detail',
+        /,
         *,
         model_name=None,
-        noun='detail',
         status_code=_empty,
         expected_error_codes=None,
         data=None,
@@ -739,7 +848,7 @@ class APITestCase(TransactionTestCase, AssertionHelpers, AssertionModelHelpers):
         return False
 
     def _compare_model(
-        self, expected_model, found_model, partial, prefix='', *, missing_ok=None
+        self, expected_model, found_model, partial, /, prefix='', *, missing_ok=None
     ):
         missing_ok = set(missing_ok or [])
         self.assertIsInstance(found_model, dict, 'found_model was not a dict')
@@ -889,7 +998,7 @@ class APITestCase(TransactionTestCase, AssertionHelpers, AssertionModelHelpers):
                 )
             )
 
-    def _serialize_models(self, models, many=None, **kwargs):
+    def _serialize_models(self, models, *, many=None, **kwargs):
         assert (
             self.serializer_class is not None
         ), 'no serializer_class provided and raw model was passed'
@@ -1178,8 +1287,12 @@ class APITestCase(TransactionTestCase, AssertionHelpers, AssertionModelHelpers):
             draft=True,
         )
         self.event = models.Event.objects.create(
-            datetime=today_noon, short='test', name='Test Event'
+            datetime=today_noon,
+            short='test',
+            name='Test Event',
+            prize_drawing_date=(today_noon + datetime.timedelta(days=14)).date(),
         )
+
         self.anonymous_user = AnonymousUser()
         self.user = User.objects.create(username='test')
         self.view_user = User.objects.create(username='view')
@@ -1303,3 +1416,10 @@ class TrackerSeleniumTestCase(StaticLiveServerTestCase, metaclass=_TestFailedMet
         WebDriverWait(self.webdriver, 5).until_not(
             EC.presence_of_element_located((By.CSS_SELECTOR, '[data-testid="spinner"]'))
         )
+
+
+def transpose(s: str):
+    a, b = random.sample(range(len(s)), k=2)
+    if a > b:
+        a, b = b, a
+    return s[:a] + s[b] + s[a + 1 : b] + s[a] + s[b + 1 :]

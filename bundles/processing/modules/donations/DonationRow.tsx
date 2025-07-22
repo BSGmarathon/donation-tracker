@@ -1,10 +1,11 @@
 import React from 'react';
-import classNames from 'classnames';
+import cn from 'classnames';
 import { useDrag, useDrop } from 'react-dnd';
 import { Box, Clickable, Stack, Tag, Text } from '@faulty/gdq-design';
 
 import { Donation, DonationBid } from '@public/apiv2/Models';
 import * as CurrencyUtils from '@public/util/currency';
+import { useEventCurrency } from '@public/util/currency';
 import DragHandle from '@uikit/icons/DragHandle';
 import Pin from '@uikit/icons/Pin';
 
@@ -18,14 +19,14 @@ const UNKNOWN_DONOR_NAME = '(unknown)';
 
 interface BidsRowProps {
   bids: DonationBid[];
-  currency: string;
 }
 
 function BidsRow(props: BidsRowProps) {
-  const { bids, currency } = props;
+  const { bids } = props;
+  const eventCurrency = useEventCurrency();
   if (bids.length === 0) return null;
 
-  const bidNames = bids.map(bid => `${bid.bid_name} (${CurrencyUtils.asCurrency(bid.amount, { currency })})`);
+  const bidNames = bids.map(bid => `${bid.bid_name} (${eventCurrency(bid.amount)})`);
 
   return (
     <Text variant="text-sm/normal" className={styles.bids}>
@@ -114,7 +115,7 @@ export default function DonationRow(props: DonationRowProps) {
   const donationComment = (
     <Text
       variant={hasComment ? 'text-md/normal' : 'text-md/secondary'}
-      className={classNames(styles.comment, { [styles.noCommentHint]: !hasComment })}>
+      className={cn(styles.comment, { [styles.noCommentHint]: !hasComment })}>
       {hasComment ? <HighlightKeywords>{donation.comment || ''}</HighlightKeywords> : <em>No comment was provided</em>}
     </Text>
   );
@@ -125,7 +126,7 @@ export default function DonationRow(props: DonationRowProps) {
         ref={rowRef}
         radius="large"
         border="subtle"
-        className={classNames(styles.container, {
+        className={cn(styles.container, {
           [styles.isDropOver]: isOver && canDrop,
           [styles.dragging]: isDragging,
         })}>
@@ -141,7 +142,7 @@ export default function DonationRow(props: DonationRowProps) {
             </Stack>
             {renderActions(donation)}
           </Stack>
-          {showBids ? <BidsRow bids={donation.bids} currency={donation.currency} /> : null}
+          {showBids ? <BidsRow bids={donation.bids} /> : null}
         </div>
         {donationComment}
       </Box>

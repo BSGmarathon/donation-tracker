@@ -2,11 +2,13 @@ import datetime
 import logging
 import random
 import time
+from collections import defaultdict
 from decimal import Decimal
 from functools import reduce
 
 from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
+from django.core.signing import Signer
 from django.db import models
 from django.db.models import Avg, Count, FloatField, Max, Prefetch, Q, Sum, signals
 from django.db.models.functions import Cast, Coalesce
@@ -15,6 +17,7 @@ from django.urls import reverse
 from django.utils import timezone
 
 from .. import settings, util
+from ..util import median
 from ..validators import nonzero, positive
 from .fields import OneToOneOrNoneField
 from .tag import AbstractTag
@@ -96,7 +99,8 @@ class DonationQuerySet(models.QuerySet):
         return self.prefetch_related(
             Prefetch('bids', queryset=DonationBid.objects.public()),
             Prefetch('bids__bid', queryset=bids),
-            Prefetch('bids__bid__parent', queryset=bids),
+            'bids__bid__speedrun',
+            'bids__bid__event',
         )
 
 
@@ -253,11 +257,12 @@ class Donation(models.Model):
         """returns True if
         a) the event is set
          AND
-        b.1) the event is set to one-step screening
+        b.1) the event is not using two pass mode
          OR
         b.2) the user has `send_to_reader` permission"""
         return self.event and (
-            self.event.use_one_step_screening or user.has_perm('tracker.send_to_reader')
+            self.event.screening_mode != 'two_pass'
+            or user.has_perm('tracker.send_to_reader')
         )
 
     @property
@@ -271,8 +276,25 @@ class Donation(models.Model):
     def donor_cache(self):
         return self.donor.cache_for(self.event_id)
 
+    def get_paypal_signature(self):
+        """id is used twice to make it easier to scan IPNs that correspond to a given donation, and then to verify
+        the signature"""
+        signer = Signer(salt=str(Decimal(self.amount).quantize(Decimal('0.00'))))
+        prefix = settings.TRACKER_PAYPAL_SIGNATURE_PREFIX
+        assert (
+            isinstance(prefix, str) and 1 <= len(prefix) <= 8
+        ), 'TRACKER_PAYPAL_SIGNATURE_PREFIX incorrectly configured'
+        signature = signer.sign_object(
+            {'id': self.id, 'domainId': self.domainId}, compress=True
+        )
+        return f'{prefix}:{self.id}:{signature}'
+
+    get_paypal_signature.short_description = 'PayPal Signature'
+
+    paypal_signature = property(get_paypal_signature)
+
     def get_absolute_url(self):
-        return reverse('tracker:donation', args=(self.id,))
+        return util.build_public_url(reverse('tracker:donation', args=(self.id,)))
 
     def bid_total(self):
         return reduce(
@@ -295,12 +317,13 @@ class Donation(models.Model):
 
         return False
 
-    def clean(self, bid=None):
+    def clean(self):
         super(Donation, self).clean()
+        errors = defaultdict(list)
         if self.domain == 'LOCAL' and not self.donor:
-            raise ValidationError('Local donations must have a donor')
-        if not self.donor and self.transactionstate != 'PENDING':
-            raise ValidationError(
+            errors['donor'].append('Local donations must have a donor')
+        if self.transactionstate != 'PENDING' and not self.donor:
+            errors['donor'].append(
                 'Donation must have a donor when in a non-pending state'
             )
 
@@ -309,33 +332,32 @@ class Donation(models.Model):
         else:
             bids = []
 
-        # because non-saved bids will not have an id, they are not hashable, so we have to special case them
-        if bid:
-            if not bid.id:
-                bids = list(bids) + [bid]
-            else:
-                # N.B. the order here is very important, as we want the new copy of bid to override the old one (if present)
-                bids = list({bid} | bids)
-
-        bids = [b.amount or 0 for b in bids]
-        bidtotal = reduce(lambda a, b: a + b, bids, Decimal('0'))
+        bidtotal = reduce(lambda a, b: a + b, (b.amount for b in bids), Decimal(0))
         if self.amount and bidtotal > self.amount:
-            raise ValidationError(
+            errors['amount'].append(
                 'Bid total is greater than donation amount: %s > %s'
                 % (bidtotal, self.amount)
             )
 
+        if errors:
+            raise ValidationError(errors)
+
     def save(self, *args, **kwargs):
         if self.readstate == 'PENDING':
-            threshold = self.event.auto_approve_threshold
-            if threshold is not None and self.anonymous() and not self.comment:
+            if self.event.screening_mode == 'host_only':
+                self.readstate = 'READY'
+            elif (
+                (threshold := self.event.auto_approve_threshold) is not None
+                and self.anonymous()
+                and not self.comment
+            ):
                 # when a threshold is set, anonymous, no-comment donations are
                 # either sent right to the reader or ignored
                 if self.amount >= threshold:
                     self.readstate = 'READY'
                 else:
                     self.readstate = 'IGNORED'
-        elif self.readstate == 'FLAGGED' and self.event.use_one_step_screening:
+        elif self.readstate == 'FLAGGED' and self.event.screening_mode != 'two_pass':
             # this is one side of an edge case involving this flag, see the event model for the other
             self.readstate = 'READY'
         if not self.timereceived:
@@ -371,18 +393,6 @@ class Donation(models.Model):
     def __str__(self):
         donor_name = self.donor.visible_name if self.donor else '(Unconfirmed)'
         return f'{donor_name} ({self.amount}) {self.timereceived}'
-
-
-@receiver(signals.post_save)
-def donation_ipns_update(sender, instance, created, raw, **kwargs):
-    from paypal.standard.ipn.models import PayPalIPN
-
-    if sender != PayPalIPN or ':' not in instance.custom:
-        return
-    if d := Donation.objects.filter(
-        Q(domainId=instance.txn_id) | Q(id=instance.custom.split(':')[0])
-    ).first():
-        d.ipns.add(instance)
 
 
 @receiver(signals.post_save, sender=Donation)
@@ -572,10 +582,13 @@ class Donor(models.Model):
 
 class DonorCache(models.Model):
     # null event = all events
-    # TODO: split by event currency?
     event = models.ForeignKey('Event', blank=True, null=True, on_delete=models.CASCADE)
-    # TODO: null donor = all donors
-    donor = models.ForeignKey('Donor', on_delete=models.CASCADE, related_name='cache')
+    # split by currency, only for "all events"
+    currency = models.CharField(max_length=16, blank=True, null=True)
+    # null donor = all donors
+    donor = models.ForeignKey(
+        'Donor', blank=True, null=True, on_delete=models.CASCADE, related_name='cache'
+    )
     donation_total = models.DecimalField(
         decimal_places=2,
         max_digits=20,
@@ -602,6 +615,13 @@ class DonorCache(models.Model):
         default=0,
         db_index=True,
     )
+    donation_med = models.DecimalField(
+        decimal_places=2,
+        max_digits=20,
+        editable=False,
+        default=0,
+        db_index=True,
+    )
 
     @staticmethod
     @receiver(signals.post_save, sender=Donation)
@@ -609,26 +629,28 @@ class DonorCache(models.Model):
     def donation_update(sender, instance, **args):
         if not instance.donor:
             return
-        cache, c = DonorCache.objects.get_or_create(
-            event=instance.event, donor=instance.donor
-        )
-        cache.update()
-        if cache.donation_count:
-            cache.save()
-        else:
-            cache.delete()
-        cache, c = DonorCache.objects.get_or_create(event=None, donor=instance.donor)
-        cache.update()
-        if cache.donation_count:
-            cache.save()
-        else:
-            cache.delete()
+
+        DonorCache.objects.get_or_create(event=instance.event, donor=instance.donor)[
+            0
+        ].update()
+        DonorCache.objects.get_or_create(
+            event=None, donor=instance.donor, currency=instance.event.paypalcurrency
+        )[0].update()
+        DonorCache.objects.get_or_create(event=instance.event, donor=None)[0].update()
+        DonorCache.objects.get_or_create(
+            event=None, donor=None, currency=instance.event.paypalcurrency
+        )[0].update()
 
     def update(self):
-        aggregate = Donation.objects.completed().filter(donor=self.donor)
+        # TODO: separate caches for test donations?
+        donations = Donation.objects.completed().filter(testdonation=False)
+        if self.donor:
+            donations = donations.filter(donor=self.donor)
         if self.event:
-            aggregate = aggregate.filter(event=self.event)
-        aggregate = aggregate.aggregate(
+            donations = donations.filter(event=self.event)
+        else:
+            donations = donations.filter(event__paypalcurrency=self.currency)
+        aggregate = donations.aggregate(
             total=Cast(Coalesce(Sum('amount'), 0.0), output_field=FloatField()),
             count=Coalesce(Count('amount'), 0),
             max=Cast(Coalesce(Max('amount'), 0.0), output_field=FloatField()),
@@ -638,11 +660,18 @@ class DonorCache(models.Model):
         self.donation_count = aggregate['count']
         self.donation_max = aggregate['max']
         self.donation_avg = aggregate['avg']
+        self.donation_med = median(donations, 'amount')
+        if self.donation_count:
+            self.save()
+        else:
+            self.delete()
 
     def __str__(self):
-        return (
-            f'{str(self.donor)} -- {(str(self.event) if self.event else "All Events")}'
-        )
+        parts = [self.donor or 'All Donors', self.event or 'All Events']
+        if self.event is None:
+            parts.append(self.currency)
+
+        return ' -- '.join(str(p) for p in parts)
 
     @property
     def donation_set(self):
@@ -703,6 +732,7 @@ class DonorCache(models.Model):
         app_label = 'tracker'
         ordering = ('donor',)
         unique_together = ('event', 'donor')
+        verbose_name = 'Donor Total'
 
 
 class MilestoneQuerySet(models.QuerySet):

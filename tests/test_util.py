@@ -1,6 +1,9 @@
+import os
 import re
+from collections import defaultdict
+from io import StringIO
 
-from django.test import TestCase
+from django.test import RequestFactory, TestCase, override_settings
 
 from tracker import models, util
 
@@ -9,7 +12,7 @@ from .util import today_noon
 
 class TestRandomNumReplace(TestCase):
     def testMakeAuthCode(self):
-        authLen = 555
+        authLen = 554
         testCreate = util.make_auth_code(length=authLen)
         self.assertEqual(authLen, len(testCreate))
         self.assertTrue(re.match('[0-9A-Za-z]+', testCreate))
@@ -79,3 +82,93 @@ class TestUtil(TestCase):
             ),
             {'foo', 'bar', 'baz', 'quux'},
         )
+
+    def test_build_public_url(self):
+        from django.contrib.sites.models import Site
+
+        site1 = Site.objects.create(name='One', domain='//one.com')
+        site2 = Site.objects.create(name='Two', domain='https://two.com')
+        site3 = Site.objects.create(name='Three', domain='three.com')
+        # TRACKER_PUBLIC_SITE_ID overrides the request host
+        request = RequestFactory().get('/bar/foo')
+        with override_settings(TRACKER_PUBLIC_SITE_ID=site1.id):
+            self.assertEqual(util.build_public_url('/foo/bar'), '//one.com/foo/bar')
+            self.assertEqual(
+                util.build_public_url('/foo/bar', request), 'http://one.com/foo/bar'
+            )
+            self.assertEqual(
+                util.build_public_url('//two.com/foo/bar'), '//two.com/foo/bar'
+            )
+        with override_settings(TRACKER_PUBLIC_SITE_ID=site2.id):
+            self.assertEqual(
+                util.build_public_url('/foo/bar'), 'https://two.com/foo/bar'
+            )
+            self.assertEqual(
+                util.build_public_url('/foo/bar', request), 'https://two.com/foo/bar'
+            )
+            # keeps the scheme if provided, else uses the one from the site
+            self.assertEqual(
+                util.build_public_url('http://one.com/foo/bar'),
+                'http://one.com/foo/bar',
+            )
+            self.assertEqual(
+                util.build_public_url('//one.com/foo/bar'), 'https://one.com/foo/bar'
+            )
+        with override_settings(TRACKER_PUBLIC_SITE_ID=site3.id):
+            self.assertEqual(util.build_public_url('/foo/bar'), '//three.com/foo/bar')
+            self.assertEqual(
+                util.build_public_url('/foo/bar', request), 'http://three.com/foo/bar'
+            )
+            self.assertEqual(
+                util.build_public_url('//two.com/foo/bar'), '//two.com/foo/bar'
+            )
+        # using SITE_ID fallback
+        current_site = Site.objects.get_current()
+        self.assertEqual(
+            util.build_public_url('/foo/bar'), f'//{current_site.domain}/foo/bar'
+        )
+        with override_settings(SITE_ID=None):
+            self.assertEqual(util.build_public_url('/foo/bar'), '/foo/bar')
+            self.assertEqual(
+                util.build_public_url('/foo/bar', request),
+                request.build_absolute_uri('/foo/bar'),
+            )
+
+
+class TestTQDM(TestCase):
+    def groups(self, output):
+        test = ((1, 0), (1, 1), (2, 0), (2, 1), (2, 2))
+
+        groups = defaultdict(list)
+
+        for k, g in util.tqdm_groupby(
+            test, key=lambda i: i[0], file=output, mininterval=0
+        ):
+            groups[k] += list(g)
+
+        return groups
+
+    def test_tqdm_groupby(self):
+        output = StringIO()
+
+        os.environ.pop('TRACKER_DISABLE_TQDM', None)
+
+        groups = self.groups(output)
+
+        self.assertEqual(groups, {1: [(1, 0), (1, 1)], 2: [(2, 0), (2, 1), (2, 2)]})
+        self.assertIn('0%', output.getvalue())
+        self.assertIn('0/5', output.getvalue())
+        self.assertIn('40%', output.getvalue())
+        self.assertIn('2/5', output.getvalue())
+        self.assertIn('100%', output.getvalue())
+        self.assertIn('5/5', output.getvalue())
+
+    def test_tqdm_groupby_without_tqdm(self):
+        output = StringIO()
+
+        os.environ['TRACKER_DISABLE_TQDM'] = '1'
+
+        groups = self.groups(output)
+
+        self.assertEqual(groups, {1: [(1, 0), (1, 1)], 2: [(2, 0), (2, 1), (2, 2)]})
+        self.assertEqual(output.getvalue(), '')

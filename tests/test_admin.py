@@ -4,9 +4,12 @@ import random
 import time
 from unittest import skipIf
 
+import django
+from django.contrib.admin.helpers import ACTION_CHECKBOX_NAME
 from django.contrib.admin.options import IncorrectLookupParameters
 from django.contrib.auth import get_user_model
 from django.contrib.auth import models as auth_models
+from django.contrib.sites.models import Site
 from django.forms import ModelChoiceField
 from django.test import RequestFactory, TestCase
 from django.urls import reverse
@@ -21,7 +24,13 @@ from tracker.admin.bid import BidAdmin
 from tracker.admin.filters import RunEventListFilter
 
 from . import randgen
-from .util import TrackerSeleniumTestCase, today_noon, tomorrow_noon
+from .util import (
+    AssertionHelpers,
+    TrackerSeleniumTestCase,
+    long_ago_noon,
+    today_noon,
+    tomorrow_noon,
+)
 
 
 class MergeDonorsViewTests(TestCase):
@@ -85,6 +94,7 @@ def retry(n_or_func):
 class ProcessDonationsAndBidsBrowserTest(TrackerSeleniumTestCase):
     def setUp(self):
         User = get_user_model()
+        Site.objects.create(domain='localhost', name='Local Server')
         self.rand = random.Random(None)
         self.superuser = User.objects.create_superuser(
             'superuser',
@@ -156,8 +166,22 @@ class ProcessDonationsAndBidsBrowserTest(TrackerSeleniumTestCase):
             f'tr[data-testid="bid-{bid_id}"] button[data-testid="action-{action}"]',
         ).click()
 
-    def test_one_step_screening(self):
-        self.event.use_one_step_screening = True
+    def test_host_only(self):
+        self.event.screening_mode = 'host_only'
+        self.event.save()
+        self.tracker_login(self.processor.username)
+        self.webdriver.get(
+            f'{self.live_server_url}{reverse("admin:process_donations")}'
+        )
+        self.click_donation(self.donation.pk, 'read')
+        # FIXME: what element can we look for?
+        time.sleep(1)
+        self.donation.refresh_from_db()
+        self.assertEqual(self.donation.readstate, 'READ')
+        self.assertEqual(self.donation.commentstate, 'APPROVED')
+
+    def test_one_pass_screening(self):
+        self.event.screening_mode = 'one_pass'
         self.event.save()
         self.tracker_login(self.processor.username)
         self.webdriver.get(
@@ -167,9 +191,10 @@ class ProcessDonationsAndBidsBrowserTest(TrackerSeleniumTestCase):
         self.webdriver.find_element(By.CSS_SELECTOR, 'button[aria-name="undo"]')
         self.donation.refresh_from_db()
         self.assertEqual(self.donation.readstate, 'READY')
+        self.assertEqual(self.donation.commentstate, 'APPROVED')
 
-    def test_two_step_screening(self):
-        self.event.use_one_step_screening = False
+    def test_two_pass_screening(self):
+        self.event.screening_mode = 'two_pass'
         self.event.save()
         self.tracker_login(self.processor.username)
         self.webdriver.get(
@@ -179,6 +204,7 @@ class ProcessDonationsAndBidsBrowserTest(TrackerSeleniumTestCase):
         self.webdriver.find_element(By.CSS_SELECTOR, 'button[aria-name="undo"]')
         self.donation.refresh_from_db()
         self.assertEqual(self.donation.readstate, 'FLAGGED')
+        self.assertEqual(self.donation.commentstate, 'APPROVED')
         self.tracker_logout()
         self.tracker_login(self.head_processor.username)
         self.webdriver.get(
@@ -243,32 +269,37 @@ class TestAdminViews(TestCase):
 
     def test_automail_prize_contributors(self):
         self.client.force_login(self.superuser)
-        response = self.client.get(reverse('admin:automail_prize_contributors'))
+        response = self.client.get(reverse('admin:tracker_automail_prize_contributors'))
         self.assertEqual(response.status_code, 200)
 
         response = self.client.get(
-            reverse('admin:automail_prize_contributors', args=(self.event.short,))
+            reverse(
+                'admin:tracker_automail_prize_contributors', args=(self.event.short,)
+            )
         )
         self.assertEqual(response.status_code, 200)
 
     def test_automail_prize_winners(self):
         self.client.force_login(self.superuser)
-        response = self.client.get(reverse('admin:automail_prize_winners'))
+        response = self.client.get(reverse('admin:tracker_automail_prize_winners'))
         self.assertEqual(response.status_code, 200)
 
         response = self.client.get(
-            reverse('admin:automail_prize_winners', args=(self.event.short,))
+            reverse('admin:tracker_automail_prize_winners', args=(self.event.short,))
         )
         self.assertEqual(response.status_code, 200)
 
     def test_automail_prize_accept_notifications(self):
         self.client.force_login(self.superuser)
-        response = self.client.get(reverse('admin:automail_prize_accept_notifications'))
+        response = self.client.get(
+            reverse('admin:tracker_automail_prize_accept_notifications')
+        )
         self.assertEqual(response.status_code, 200)
 
         response = self.client.get(
             reverse(
-                'admin:automail_prize_accept_notifications', args=(self.event.short,)
+                'admin:tracker_automail_prize_accept_notifications',
+                args=(self.event.short,),
             )
         )
         self.assertEqual(response.status_code, 200)
@@ -276,13 +307,14 @@ class TestAdminViews(TestCase):
     def test_automail_prize_shipping_notifications(self):
         self.client.force_login(self.superuser)
         response = self.client.get(
-            reverse('admin:automail_prize_shipping_notifications')
+            reverse('admin:tracker_automail_prize_shipping_notifications')
         )
         self.assertEqual(response.status_code, 200)
 
         response = self.client.get(
             reverse(
-                'admin:automail_prize_shipping_notifications', args=(self.event.short,)
+                'admin:tracker_automail_prize_shipping_notifications',
+                args=(self.event.short,),
             )
         )
         self.assertEqual(response.status_code, 200)
@@ -319,9 +351,7 @@ class TestAdminFilters(TestCase):
         other_event = randgen.generate_event(self.rand, tomorrow_noon)
         other_event.save()
         runs = randgen.generate_runs(self.rand, event, 5, ordered=True)
-        other_runs = randgen.generate_runs(
-            self.rand, other_event, num_runs=5, ordered=True
-        )
+        other_runs = randgen.generate_runs(self.rand, other_event, 5, ordered=True)
         bid = randgen.generate_bid(self.rand, run=runs[0], allow_children=False)[0]
         bid.save()
         event_bid = randgen.generate_bid(self.rand, event=event, allow_children=False)[
@@ -385,6 +415,78 @@ class TestAdminFilters(TestCase):
             )
 
 
+class TestEventArchivedMixin(TestCase, AssertionHelpers):
+    def setUp(self):
+        self.factory = RequestFactory()
+        self.super_user = auth_models.User.objects.create_superuser('superuser')
+        self.rand = random.Random()
+        self.event = randgen.generate_event(self.rand, today_noon)
+        self.event.save()
+        self.run = randgen.generate_run(self.rand, self.event)
+        self.run.save()
+        self.archived_event = randgen.generate_event(self.rand, long_ago_noon)
+        self.archived_event.archived = True
+        self.archived_event.save()
+        self.archived_run = randgen.generate_run(self.rand, self.archived_event)
+        self.archived_run.save()
+
+    @skipIf(
+        django.VERSION >= (5, 1, 0),
+        'delete_selected is broken for certain models on 4.2',
+    )
+    def test_delete_selected_disabled(self):
+        self.client.force_login(self.super_user)
+        response = self.client.get(
+            reverse('admin:tracker_speedrun_changelist'),
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertNotIn(
+            'delete_selected',
+            (c[0] for c in response.context['action_form'].fields['action'].choices),
+        )
+
+    @skipIf(
+        django.VERSION < (5, 1, 0),
+        'delete_selected is broken for certain models on 4.2',
+    )
+    def test_delete_selected(self):
+        self.client.force_login(self.super_user)
+        response = self.client.post(
+            reverse('admin:tracker_speedrun_changelist'),
+            data={
+                'action': 'delete_selected',
+                ACTION_CHECKBOX_NAME: [self.run.id, self.archived_run.id],
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('Speed Run on Archived Event', response.context['perms_lacking'])
+        response = self.client.post(
+            reverse('admin:tracker_speedrun_changelist'),
+            data={
+                'action': 'delete_selected',
+                ACTION_CHECKBOX_NAME: [self.run.id, self.archived_run.id],
+                'post': 'yes',
+            },
+        )
+        self.assertEqual(response.status_code, 403)
+        self.assertQuerySetEqual(
+            models.SpeedRun.objects.all(), {self.run, self.archived_run}, ordered=False
+        )
+        response = self.client.post(
+            reverse('admin:tracker_speedrun_changelist'),
+            data={
+                'action': 'delete_selected',
+                ACTION_CHECKBOX_NAME: [self.run.id],
+                'post': 'yes',
+            },
+        )
+        self.assertRedirects(response, reverse('admin:tracker_speedrun_changelist'))
+        self.assertMessages(response, ['Successfully deleted 1 Speed Run.'])
+        self.assertQuerySetEqual(
+            models.SpeedRun.objects.all(), {self.archived_run}, ordered=False
+        )
+
+
 class TestReadOnlyEventMixin(TestCase):
     def setUp(self):
         self.factory = RequestFactory()
@@ -405,6 +507,18 @@ class TestReadOnlyEventMixin(TestCase):
         event_field = resp.context['adminform'].fields['event']
         self.assertIsInstance(event_field, ModelChoiceField)
         self.assertFalse(event_field.disabled)
+        resp = self.client.post(
+            reverse('admin:tracker_milestone_add'),
+            data={
+                'event': self.event.id,
+                'name': self.milestone.name,
+                'amount': self.milestone.amount + 20,
+                'start': self.milestone.start,
+            },
+            follow=True,
+        )
+        self.assertEqual(resp.status_code, 200)
+        self.assertTrue(resp.resolver_match.url_name.endswith('changelist'))
 
     def test_change_form(self):
         self.client.force_login(self.super_user)

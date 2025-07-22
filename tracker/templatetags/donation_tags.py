@@ -1,12 +1,15 @@
-import datetime
-import locale
-import urllib.parse
+from __future__ import annotations
 
+import urllib.parse
+from decimal import Decimal
+
+from babel import localedata, numbers
 from django import template
 from django.utils.html import conditional_escape, format_html
 from django.utils.safestring import mark_safe
 
-import tracker.viewutil as viewutil
+from tracker import settings, viewutil
+from tracker.models import DonorCache, Event
 
 register = template.Library()
 
@@ -125,33 +128,6 @@ class PageLinkNode(template.Node):
         return sortlink('', page, sort=sort, order=order, page=page)
 
 
-@register.tag('rendertime')
-def do_rendertime(parser, token):
-    try:
-        tag_name, time = token.split_contents()
-    except ValueError:
-        raise template.TemplateSyntaxError(
-            '%r tag requires a single argument' % token.contents.split()[0]
-        )
-    return RenderTimeNode(time)
-
-
-class RenderTimeNode(template.Node):
-    def __init__(self, time):
-        self.time = template.Variable(time)
-
-    def render(self, context):
-        try:
-            time = self.time.resolve(context)
-            try:
-                now = datetime.datetime.now() - time
-            except TypeError:
-                return ''
-            return '%d.%d seconds' % (now.seconds, now.microseconds)
-        except template.VariableDoesNotExist:
-            return ''
-
-
 @register.filter
 def forumfilter(value, autoescape=None):
     if autoescape:
@@ -168,18 +144,21 @@ forumfilter.is_safe = True
 forumfilter.needs_autoescape = True
 
 
-@register.filter
-def money(value):
-    locale.setlocale(locale.LC_ALL, '')
-    try:
-        if not value:
-            return locale.currency(0.0)
-        return locale.currency(value, symbol=True, grouping=True)
-    except ValueError:
-        locale.setlocale(locale.LC_MONETARY, 'en_US.utf8')
-        if not value:
-            return locale.currency(0.0)
-        return locale.currency(value, symbol=True, grouping=True)
+@register.simple_tag
+def money(cfg: DonorCache | Event | str, value: str | float | Decimal):
+    code = settings.LANGUAGE_CODE
+    currency = 'UNK'
+    if isinstance(cfg, str):
+        currency = cfg
+    if isinstance(cfg, DonorCache):
+        # use the currency if available, else fall back to the event
+        currency = cfg.currency
+        cfg = cfg.event
+    if isinstance(cfg, Event):
+        code = cfg.locale_code or code
+        currency = cfg.paypalcurrency
+    code = localedata.normalize_locale(code.replace('-', '_'))
+    return numbers.format_currency(value, currency=currency, locale=code)
 
 
 money.is_safe = True
@@ -215,26 +194,27 @@ def admin_url(obj):
 def standardform(
     context, form, formid='formid', submittext='Submit', action=None, showrequired=True
 ):
-    return template.loader.render_to_string(
-        'standardform.html',
+    context.push(
         {
             'form': form,
             'formid': formid,
             'submittext': submittext,
-            action: action,
-            'csrf_token': context.get('csrf_token', None),
+            'action': action,
             'showrequired': showrequired,
-        },
+        }
+    )
+    return template.loader.render_to_string(
+        'standardform.html',
+        context.flatten(),
     )
 
 
-@register.simple_tag(takes_context=True)
-def form_innards(context, form, showrequired=True):
+@register.simple_tag
+def form_innards(form, showrequired=True):
     return template.loader.render_to_string(
         'form_innards.html',
         {
             'form': form,
             'showrequired': showrequired,
-            'csrf_token': context.get('csrf_token', None),
         },
     )

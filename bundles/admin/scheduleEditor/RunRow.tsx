@@ -41,7 +41,7 @@ function DragControls({
     <>{run.order}</>
   ) : (
     <ActiveInput
-      className={cn(styles.controls)}
+      className={styles.controls}
       input={{ style: { maxWidth: 50 }, required: true, min: 1, step: 1, type: 'number' }}
       displayValue={run.order || '-'}
       initialValue={run.order || 1}
@@ -80,7 +80,7 @@ function DurationControls({
   const canChangeRuns = useArchivedPermission('tracker.change_speedrun');
   return (
     <ActiveInput
-      className={cn(styles.controls)}
+      className={styles.controls}
       input={{ required: true, pattern: durationPattern.toString().slice(1, -1) }}
       initialValue={value.toFormat('h:mm:ss')}
       canEdit={canChangeRuns}
@@ -111,7 +111,7 @@ function StartTimeControls({
 
   return (
     <ActiveInput
-      className={cn(styles.controls)}
+      className={styles.controls}
       input={{ type: 'datetime-local' }}
       displayValue={starttime?.toLocaleString(DateTime.DATETIME_MED_WITH_WEEKDAY) || '-'}
       initialValue={anchor_time ? toInputTime(anchor_time) : ''}
@@ -131,10 +131,11 @@ function StartTimeControls({
   );
 }
 
-export function RunRow({ run }: { run: Run }) {
+export function RunRow({ run, prizeCount }: { run: Run; prizeCount?: { start: number; end: number } }) {
   const { ADMIN_ROOT } = useConstants();
   const canViewRuns = usePermission('tracker.view_speedrun');
   const canChangeRuns = useArchivedPermission('tracker.change_speedrun');
+  const canViewPrizes = usePermission('tracker.view_prize');
   // a run moving between ordered and unordered or vice versa ends up remounting the component, so fixedCacheKey is used
   //  here to preserve the mutation state
   const [moveRun, moveResult] = useMoveRunMutation({ fixedCacheKey: run.id.toString() });
@@ -228,6 +229,28 @@ export function RunRow({ run }: { run: Run }) {
             <DragControls drag={drag} loading={moveResult.isLoading} run={run} moveRun={moveRunTo} />
           ) : (
             <Spinner spinning={moveResult.isLoading}>{run.order || '-'}</Spinner>
+          )}
+        </td>
+        <td>
+          {prizeCount && prizeCount.start !== 0 && (
+            <span
+              className={cn('fa', 'fa-arrow-down')}
+              title={`${prizeCount.start} prizes open here`}
+              aria-label="prizes open">
+              {canViewPrizes ? (
+                <a href={`${ADMIN_ROOT}prize/?startrun=${run.id}`}>{prizeCount.start}</a>
+              ) : (
+                prizeCount.start
+              )}
+            </span>
+          )}
+          {prizeCount && prizeCount.end !== 0 && (
+            <span
+              className={cn('fa', 'fa-arrow-up')}
+              title={`${prizeCount.end} prizes close here`}
+              aria-label="prizes close">
+              {canViewPrizes ? <a href={`${ADMIN_ROOT}prize/?endrun=${run.id}`}>{prizeCount.end}</a> : prizeCount.end}
+            </span>
           )}
         </td>
         <td ref={dragPreview}>{run.name}</td>

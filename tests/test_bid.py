@@ -7,12 +7,20 @@ from django.test import TestCase
 from django.urls import reverse
 
 from tracker import models
+from tracker.admin.inlines import BidChainedInline, BidDependentsInline, BidOptionInline
 
 from . import randgen
-from .util import MigrationsTestCase, long_ago_noon, today_noon, tomorrow_noon
+from .util import (
+    AssertionHelpers,
+    MigrationsTestCase,
+    find_admin_inline,
+    long_ago_noon,
+    today_noon,
+    tomorrow_noon,
+)
 
 
-class TestBidBase(TestCase):
+class TestBidBase(TestCase, AssertionHelpers):
     def setUp(self):
         super().setUp()
         self.rand = random.Random(None)
@@ -58,6 +66,12 @@ class TestBidBase(TestCase):
         # covers the remainder
         self.donation4 = models.Donation.objects.create(
             donor=self.donor, event=self.event, amount=250, transactionstate='COMPLETED'
+        )
+        self.pending_donation = models.Donation.objects.create(
+            event=self.event,
+            amount=250,
+            transactionstate='PENDING',
+            domain='PAYPAL',
         )
         self.opened_parent_bid = models.Bid.objects.create(
             name='Opened Parent Test',
@@ -165,12 +179,6 @@ class TestBidBase(TestCase):
             parent=self.chain_middle,
             goal=125,
         )
-        # make sure the derived fields are correct
-        self.opened_parent_bid.refresh_from_db()
-        self.challenge.refresh_from_db()
-        self.chain_top.refresh_from_db()
-        self.chain_middle.refresh_from_db()
-        self.chain_bottom.refresh_from_db()
 
 
 class TestBid(TestBidBase):
@@ -559,19 +567,88 @@ class TestBidAdmin(TestBidBase):
             response = self.client.get(reverse('admin:tracker_bid_changelist'))
             self.assertEqual(response.status_code, 200)
             response = self.client.get(reverse('admin:tracker_bid_add'))
+            self.assertIsNone(find_admin_inline(response, BidOptionInline))
+            self.assertIsNone(find_admin_inline(response, BidDependentsInline))
+            self.assertIsNone(find_admin_inline(response, BidChainedInline))
             self.assertEqual(response.status_code, 200)
+            self.assertEqual(
+                set(models.Bid.TOP_LEVEL_STATES),
+                {c[0] for c in response.context['adminform'].fields['state'].choices},
+            )
+            response = self.client.get(
+                reverse('admin:tracker_bid_change', args=(self.opened_parent_bid.id,))
+            )
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(
+                set(models.Bid.TOP_LEVEL_STATES),
+                {c[0] for c in response.context['adminform'].fields['state'].choices},
+            )
+            options_inline = find_admin_inline(response, BidOptionInline)
+            self.assertIn('state', options_inline.forms[0].fields)
+            self.assertEqual(
+                {self.opened_parent_bid.state, 'PENDING', 'DENIED'},
+                {c[0] for c in options_inline.forms[0].fields['state'].choices},
+            )
+            self.assertEqual(
+                {'Inherit Parent State', 'Pending', 'Denied'},
+                {c[1] for c in options_inline.forms[0].fields['state'].choices},
+            )
+            self.assertEqual(
+                {'description', 'shortdescription', 'istarget', 'estimate'}
+                & set(options_inline.forms[0].fields),
+                set(),
+            )
+            self.assertIsNone(find_admin_inline(response, BidDependentsInline))
+            self.assertIsNone(find_admin_inline(response, BidChainedInline))
+            self.assertTrue(response.context['has_change_permission'])
+            self.assertTrue(response.context['has_delete_permission'])
             response = self.client.get(
                 reverse('admin:tracker_bid_change', args=(self.opened_bid.id,))
             )
             self.assertEqual(response.status_code, 200)
-            self.assertTrue(response.context['has_change_permission'])
-            self.assertTrue(response.context['has_delete_permission'])
+            self.assertEqual(
+                {self.opened_parent_bid.state, *models.Bid.EXTRA_CHILD_STATES},
+                {c[0] for c in response.context['adminform'].fields['state'].choices},
+            )
             response = self.client.get(
                 reverse('admin:tracker_bid_change', args=(self.archived_challenge.id,))
             )
             self.assertEqual(response.status_code, 200)
             self.assertFalse(response.context['has_change_permission'])
             self.assertFalse(response.context['has_delete_permission'])
+            self.assertIsNone(find_admin_inline(response, BidOptionInline))
+            self.assertIsNotNone(find_admin_inline(response, BidDependentsInline))
+            self.assertIsNone(find_admin_inline(response, BidChainedInline))
+            response = self.client.get(
+                reverse('admin:tracker_bid_change', args=(self.closed_parent_bid.id,))
+            )
+            self.assertEqual(response.status_code, 200)
+            options_inline = find_admin_inline(response, BidOptionInline)
+            self.assertNotIn('state', options_inline.forms[0].fields)
+            self.assertIsNone(find_admin_inline(response, BidDependentsInline))
+            self.assertIsNone(find_admin_inline(response, BidChainedInline))
+            response = self.client.get(
+                reverse('admin:tracker_bid_change', args=(self.closed_bid.id,))
+            )
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(
+                {'description', 'shortdescription', 'istarget', 'estimate'}
+                & set(options_inline.forms[0].fields),
+                {'description', 'shortdescription', 'istarget', 'estimate'},
+            )
+            self.assertNotIn('state', response.context['adminform'].fields)
+            for chain in [self.chain_top, self.chain_middle, self.chain_bottom]:
+                response = self.client.get(
+                    reverse('admin:tracker_bid_change', args=(chain.id,))
+                )
+                self.assertEqual(response.status_code, 200)
+                self.assertIsNone(find_admin_inline(response, BidOptionInline))
+                self.assertIsNotNone(find_admin_inline(response, BidDependentsInline))
+                chained_inline = find_admin_inline(response, BidChainedInline)
+                self.assertEqual(
+                    len(chained_inline.forms), 0 if chain == self.chain_bottom else 1
+                )
+
         with self.subTest('staff user'):
             self.client.force_login(self.unlocked_user)
             response = self.client.get(reverse('admin:tracker_bid_changelist'))
@@ -592,6 +669,7 @@ class TestBidAdmin(TestBidBase):
             self.assertEqual(response.status_code, 200)
             self.assertTrue(response.context['has_change_permission'])
             self.assertFalse(response.context['has_delete_permission'])
+
         with self.subTest('view user'):
             self.client.force_login(self.view_user)
             response = self.client.get(reverse('admin:tracker_bid_changelist'))
@@ -643,6 +721,7 @@ class TestBidAdmin(TestBidBase):
         with self.subTest('super user'):
             self.client.force_login(self.super_user)
             response = self.client.get(reverse('admin:tracker_donationbid_changelist'))
+            self.assertContains(response, 'Transactionstate')
             self.assertEqual(response.status_code, 200)
             response = self.client.get(reverse('admin:tracker_donationbid_add'))
             self.assertEqual(response.status_code, 403)
@@ -660,6 +739,41 @@ class TestBidAdmin(TestBidBase):
             )
             self.assertEqual(response.status_code, 200)
             self.assertFalse(response.context['has_change_permission'])
+        with self.subTest('staff user'):
+            self.client.force_login(self.unlocked_user)
+            response = self.client.get(reverse('admin:tracker_donationbid_changelist'))
+            self.assertEqual(response.status_code, 200)
+            self.assertNotContains(response, 'Transactionstate')
+            response = self.client.get(reverse('admin:tracker_donationbid_add'))
+            self.assertEqual(response.status_code, 403)
+            response = self.client.get(
+                reverse(
+                    'admin:tracker_donationbid_change', args=(self.donation_bid.id,)
+                )
+            )
+            self.assertEqual(response.status_code, 200)
+            response = self.client.get(
+                reverse(
+                    'admin:tracker_donationbid_change',
+                    args=(self.archived_donation_bid.id,),
+                )
+            )
+            self.assertEqual(response.status_code, 200)
+            self.assertFalse(response.context['has_change_permission'])
+        with self.subTest('view user'):
+            self.client.force_login(self.view_user)
+            response = self.client.get(reverse('admin:tracker_donationbid_changelist'))
+            self.assertEqual(response.status_code, 200)
+            self.assertNotContains(response, 'Transactionstate')
+            response = self.client.get(reverse('admin:tracker_donationbid_add'))
+            self.assertEqual(response.status_code, 403)
+            response = self.client.get(
+                reverse(
+                    'admin:tracker_donationbid_change', args=(self.donation_bid.id,)
+                )
+            )
+            self.assertEqual(response.status_code, 200)
+            self.assertFalse(response.context['has_change_permission'])
 
 
 class TestBidViews(TestBidBase):
@@ -670,7 +784,9 @@ class TestBidViews(TestBidBase):
             )
         )
         self.assertContains(resp, self.event.name)
-        self.assertContains(resp, reverse('tracker:bidindex', args=(self.event.short,)))
+        self.assertContainsUrl(
+            resp, reverse('tracker:bidindex', args=(self.event.short,))
+        )
         self.assertNotContains(
             resp, reverse('tracker:bidindex', args=(self.draft_event.short,))
         )
@@ -686,21 +802,21 @@ class TestBidViews(TestBidBase):
         self.assertContains(resp, f'Choice Total: ${self.donation.amount:.2f}')
         self.assertContains(resp, f'Challenge Total: ${self.donation2.amount:.2f}')
         self.assertContains(resp, self.opened_parent_bid.name)
-        self.assertContains(resp, self.opened_parent_bid.get_absolute_url())
+        self.assertContainsUrl(resp, self.opened_parent_bid.get_absolute_url())
         self.assertContains(resp, self.opened_bid.name)
-        self.assertContains(resp, self.opened_bid.get_absolute_url())
+        self.assertContainsUrl(resp, self.opened_bid.get_absolute_url())
         self.assertContains(resp, self.closed_parent_bid.name)
-        self.assertContains(resp, self.closed_parent_bid.get_absolute_url())
+        self.assertContainsUrl(resp, self.closed_parent_bid.get_absolute_url())
         self.assertContains(resp, self.closed_bid.name)
-        self.assertContains(resp, self.closed_bid.get_absolute_url())
+        self.assertContainsUrl(resp, self.closed_bid.get_absolute_url())
         self.assertNotContains(resp, self.hidden_parent_bid.name)
-        self.assertNotContains(resp, self.hidden_parent_bid.get_absolute_url())
+        self.assertNotContainsUrl(resp, self.hidden_parent_bid.get_absolute_url())
         self.assertNotContains(resp, self.hidden_bid.name)
-        self.assertNotContains(resp, self.hidden_bid.get_absolute_url())
+        self.assertNotContainsUrl(resp, self.hidden_bid.get_absolute_url())
         self.assertNotContains(resp, self.denied_bid.name)
-        self.assertNotContains(resp, self.denied_bid.get_absolute_url())
+        self.assertNotContainsUrl(resp, self.denied_bid.get_absolute_url())
         self.assertNotContains(resp, self.pending_bid.name)
-        self.assertNotContains(resp, self.pending_bid.get_absolute_url())
+        self.assertNotContainsUrl(resp, self.pending_bid.get_absolute_url())
         self.assertNotContains(resp, 'Invalid Variable')
 
         resp = self.client.get(
@@ -714,7 +830,7 @@ class TestBidViews(TestBidBase):
         )
         self.assertContains(resp, self.opened_parent_bid.name)
         self.assertContains(resp, self.opened_bid.name)
-        self.assertContains(resp, self.opened_bid.get_absolute_url())
+        self.assertContainsUrl(resp, self.opened_bid.get_absolute_url())
         self.assertNotContains(resp, 'Invalid Variable')
 
         resp = self.client.get(
@@ -722,7 +838,7 @@ class TestBidViews(TestBidBase):
         )
         self.assertContains(resp, self.closed_parent_bid.name)
         self.assertContains(resp, self.closed_bid.name)
-        self.assertContains(resp, self.closed_bid.get_absolute_url())
+        self.assertContainsUrl(resp, self.closed_bid.get_absolute_url())
         self.assertNotContains(resp, 'Invalid Variable')
 
         for bid in [self.opened_bid, self.closed_bid]:
@@ -733,7 +849,7 @@ class TestBidViews(TestBidBase):
             resp = self.client.get(reverse('tracker:bid', args=(bid.id,)))
             self.assertContains(resp, bid.parent.name)
             self.assertContains(resp, bid.name)
-            self.assertContains(resp, self.donation.get_absolute_url())
+            self.assertContainsUrl(resp, self.donation.get_absolute_url())
             self.assertContains(resp, self.donation.visible_donor_name)
             # self.assertContains(
             #     resp, self.donor.cache_for(self.event.id).get_absolute_url()

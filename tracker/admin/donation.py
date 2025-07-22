@@ -51,7 +51,7 @@ class DonationAdmin(EventArchivedMixin, CustomModelAdmin):
         'commentstate',
         DonationListFilter,
     )
-    readonly_fields = ['cleared_at', 'domainId', 'ipns_']
+    readonly_fields = ['cleared_at', 'domainId', 'ipns_', 'paypal_signature']
     inlines = (DonationBidInline,)
 
     def visible_donor_name(self, obj):
@@ -132,16 +132,23 @@ class DonationAdmin(EventArchivedMixin, CustomModelAdmin):
     send_donation_postbacks.short_description = 'Send postbacks.'
 
     def rescan_ipns(self, request, queryset):
-        excluded = queryset.exclude(domain='PAYPAL')
-        queryset = queryset.filter(domain='PAYPAL')
         from paypal.standard.ipn.models import PayPalIPN
 
+        from tracker import paypalutil
+
+        excluded = queryset.exclude(domain='PAYPAL')
+        queryset = queryset.filter(domain='PAYPAL')
+
         for d in queryset.filter():
-            d.ipns.add(
-                *PayPalIPN.objects.filter(
-                    Q(custom__startswith=f'{d.id}:') | Q(txn_id=d.domainId)
+            for ipn in PayPalIPN.objects.filter(
+                Q(
+                    custom__startswith=f'{settings.TRACKER_PAYPAL_SIGNATURE_PREFIX}:{d.id}:'
                 )
-            )
+                | Q(custom__startswith=f'{d.id}:')
+                | Q(txn_id=d.domainId)
+            ):
+                if d == paypalutil.get_ipn_donation(ipn):
+                    d.ipns.add(ipn)
         self.message_user(request, f'Scanned {queryset.count()} donations.')
         if excluded.count():
             self.message_user(
@@ -175,7 +182,13 @@ class DonationAdmin(EventArchivedMixin, CustomModelAdmin):
                         if c[0] != 'ABSENT'
                     ]
             if 'readstate' in form.base_fields:
-                if obj.event.use_one_step_screening:
+                if obj.event.screening_mode == 'host_only':
+                    form.base_fields['readstate'].choices = [
+                        c
+                        for c in form.base_fields['readstate'].choices
+                        if c[0] not in ('PENDING', 'FLAGGED')
+                    ]
+                elif obj.event.screening_mode == 'one_pass':
                     form.base_fields['readstate'].choices = [
                         c
                         for c in form.base_fields['readstate'].choices
@@ -239,7 +252,7 @@ class DonationAdmin(EventArchivedMixin, CustomModelAdmin):
             and obj
             and obj.domain == 'PAYPAL'
         ):
-            other_fields += ('ipns_',)
+            other_fields += ('ipns_', 'paypal_signature')
 
         fieldsets = [
             (None, {'fields': ('donor', 'event', 'timereceived', 'cleared_at')}),
@@ -457,6 +470,54 @@ class MilestoneAdmin(EventArchivedMixin, EventReadOnlyMixin, CustomModelAdmin):
     search_fields = ('name', 'description', 'short_description')
     list_filter = ('event',)
     list_display = ('name', 'event', 'start', 'amount', 'visible')
+
+
+@admin.register(models.DonorCache)
+class DonorCacheAdmin(admin.ModelAdmin):
+    list_display = [
+        '__str__',
+        'event',
+        'donor',
+        'currency',
+        'donation_total',
+        'donation_count',
+    ]
+    list_filter = ['event', 'currency']
+    search_fields = [f'donor__{f}' for f in DonorAdmin.search_fields]
+    readonly_fields = [
+        'donation_total',
+        'donation_count',
+        'donation_avg',
+        'donation_max',
+        'donation_med',
+    ]
+
+    def get_queryset(self, request):
+        return super().get_queryset(request).select_related('event', 'donor')
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+    def has_view_permission(self, request, obj=None):
+        return request.user.has_perm('tracker.view_donor') or request.user.has_perm(
+            'tracker.view_donor_cache'
+        )
+
+    def get_search_fields(self, request):
+        search_fields = list(super().get_search_fields(request))
+        if not request.user.has_perm('tracker.view_emails'):
+            search_fields.remove('donor__email')
+            search_fields.remove('donor__paypalemail')
+        if not request.user.has_perm('tracker.view_full_names'):
+            search_fields.remove('donor__firstname')
+            search_fields.remove('donor__lastname')
+        return tuple(search_fields)
 
 
 admin.site.register(models.DonationGroup, AbstractTagAdmin)

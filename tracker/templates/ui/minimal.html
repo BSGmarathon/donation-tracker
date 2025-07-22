@@ -8,23 +8,15 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     {{ app_name|json_script:'app_name' }}
     {{ CONSTANTS|json_script:'CONSTANTS' }}
-    {{ ROOT_PATH|json_script:'ROOT_PATH' }}
-    {{ TRACKER_PATH|json_script:'TRACKER_PATH' }}
 
-    <%= htmlWebpackPlugin.tags.headTags %>
+    <% _.forEach(htmlWebpackPlugin.files.js, function(file) { %><script defer src="{% static '<%- file %>' %}"></script><% }); %>
+    <% _.forEach(htmlWebpackPlugin.files.css, function(file) { %><link href="{% static '<%- file %>' %}" rel="stylesheet"><% }); %>
 
     <script type='text/javascript'>
       <!--
       window.webpackPublicPath = "{% static 'gen/' %}";
       document.addEventListener("DOMContentLoaded", function () {
-        window[JSON.parse(document.getElementById('app_name').textContent)](
-            {
-              CONSTANTS: JSON.parse(document.getElementById('CONSTANTS').textContent),
-              ROOT_PATH: JSON.parse(document.getElementById('ROOT_PATH').textContent),
-              TRACKER_PATH: JSON.parse(document.getElementById('TRACKER_PATH').textContent),
-              csrfToken: document.querySelector('input[name=csrfmiddlewaretoken]').value,
-            }
-        );
+        window[JSON.parse(document.getElementById('app_name').textContent)]();
       });
       -->
     </script>
@@ -33,7 +25,6 @@
   <body>
     {% csrf_token %}
     <div id="container"></div>
-    {% block rendertime %}{% endblock %}
     <%= htmlWebpackPlugin.tags.bodyTags %>
   </body>
 </html>

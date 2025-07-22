@@ -41,6 +41,8 @@ interface ModelBase {
   readonly id: number;
 }
 
+export type EventScreeningMode = 'host_only' | 'one_pass' | 'two_pass';
+
 export interface Event extends ModelBase {
   readonly type: 'event';
   short: string;
@@ -48,13 +50,20 @@ export interface Event extends ModelBase {
   hashtag: string;
   datetime: DateTime;
   timezone: string;
+  minimumdonation: number;
+  maximum_paypal_donation: number | null; // null means to use the global setting
   receivername: string;
   receiver_short: string;
   receiver_solicitation_text: string;
   receiver_logo: string;
   receiver_privacy_policy: string;
   paypalcurrency: string;
+  charity_split: number;
+  /**
+   * @deprecated pseudo-alias for `screening_mode`
+   */
   use_one_step_screening: boolean;
+  screening_mode: EventScreeningMode;
   allow_donations: boolean;
   /**
    * @deprecated alias for `archived`
@@ -63,8 +72,15 @@ export interface Event extends ModelBase {
   archived: boolean;
   draft: boolean;
   // returned with '?totals'
+  /**
+   * @deprecated alias for donation_total
+   */
   amount?: number;
+  donation_total?: number;
   donation_count?: number;
+  donation_max?: number;
+  donation_avg?: number;
+  donation_med?: number;
 }
 
 export type DonationTransactionState = 'COMPLETED' | 'PENDING' | 'CANCELLED' | 'FLAGGED';
@@ -106,6 +122,7 @@ export interface BidBase extends ModelBase {
   type: 'bid';
   readonly bid_type: 'challenge' | 'choice' | 'option';
   name: string;
+  full_name: string;
   readonly event: number;
   readonly speedrun: null | number;
   readonly parent: null | number;
@@ -237,6 +254,19 @@ export interface Ad extends Interstitial {
 }
 
 export type PrizeState = 'ACCEPTED' | 'PENDING' | 'DENIED' | 'FLAGGED';
+export type PrizeLifecycle =
+  | 'pending'
+  | 'notify_contributor'
+  | 'denied'
+  | 'accepted'
+  | 'ready'
+  | 'drawn'
+  | 'winner_notified'
+  | 'claimed'
+  | 'accept_email_sent'
+  | 'needs_shipping'
+  | 'shipped'
+  | 'completed';
 
 export interface Prize extends ModelBase {
   readonly type: 'prize';
@@ -260,6 +290,7 @@ export interface Prize extends ModelBase {
   provider: string;
   creator: null | string;
   creatorwebsite: null | string;
+  lifecycle?: PrizeLifecycle;
 }
 
 export function comparePrize(a: Prize, b: Prize) {
@@ -296,13 +327,20 @@ export interface CountryRegion extends ModelBase {
 export interface Donor extends ModelBase {
   readonly type: 'donor';
   alias?: string;
-  totals?: Array<{
-    event: null | number;
-    total: number;
-    count: number;
-    avg: number;
-    max: number;
-  }>;
+  totals?: Array<
+    {
+      total: number;
+      count: number;
+      avg: number;
+      max: number;
+      med: number;
+    } & (
+      | {
+          event: number;
+        }
+      | { currency: string }
+    )
+  >;
 }
 
 export interface DonationBid extends ModelBase {

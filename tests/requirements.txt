@@ -1,5 +1,5 @@
 # base
-celery==5.5.2
+celery==5.5.3
 channels==4.2.2
 setuptools
 wheel
@@ -12,11 +12,13 @@ django-timezone-field==7.1
 djangorestframework==3.16.0
 pre-commit==4.2.0
 python-dateutil==2.8.2 ; python_version<"3.11"
+babel==2.17.0
 # only for testing
-daphne==4.1.2
-lxml==5.4.0 ; python_version<"3.10" # azure issue?
-msgpack==1.1.0
+daphne==4.2.1
+lxml==6.0.0 ; python_version<"3.10" # azure issue?
+msgpack==1.1.1
 responses~=0.25.7
-selenium==4.32.0
+selenium==4.34.2
 tblib==3.1.0
+tqdm==4.67.1
 unittest-xml-reporting==3.2.0

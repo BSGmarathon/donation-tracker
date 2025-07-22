@@ -1,5 +1,5 @@
 import React from 'react';
-import classNames from 'classnames';
+import cn from 'classnames';
 import ReactNumeric from 'react-numeric';
 
 import * as CurrencyUtils from '@public/util/currency';
@@ -43,7 +43,7 @@ const CurrencyInput = (props: CurrencyInputProps) => {
   const hasMax = max == null || max === Infinity;
 
   const handleChange = React.useCallback(
-    (_event: React.SyntheticEvent, value: number) => {
+    (event: React.ChangeEvent<HTMLInputElement>, value: number) => {
       onChange?.(value, name);
     },
     [name, onChange],
@@ -51,7 +51,7 @@ const CurrencyInput = (props: CurrencyInputProps) => {
 
   return (
     <InputWrapper
-      className={classNames(className, { [styles.disabled]: disabled })}
+      className={cn(className, { [styles.disabled]: disabled })}
       label={label}
       name={name}
       hint={hint}
@@ -68,6 +68,7 @@ const CurrencyInput = (props: CurrencyInputProps) => {
         onInvalidPaste="clamp"
         minimumValue="0.00"
         maximumValue={hasMax ? Number.MAX_SAFE_INTEGER.toFixed() : max.toFixed(2)}
+        // @ts-expect-error what is this type
         onChange={handleChange}
         disabled={disabled}
         data-testid={name}

@@ -9,21 +9,24 @@ from django import forms as djforms
 from django.contrib import admin, messages
 from django.contrib.admin import register
 from django.contrib.admin.templatetags.admin_urls import add_preserved_filters
+from django.contrib.admin.utils import display_for_value
 from django.contrib.admin.views.autocomplete import AutocompleteJsonView
+from django.contrib.auth import get_user_model
 from django.contrib.auth import models as auth
 from django.contrib.auth.decorators import permission_required, user_passes_test
-from django.core.files.storage import DefaultStorage
+from django.core.files.storage import InvalidStorageError, default_storage, storages
 from django.core.validators import EmailValidator
 from django.db.models import Q, Sum
 from django.http import Http404, HttpResponse, HttpResponseRedirect
 from django.shortcuts import redirect, render
 from django.urls import path, reverse
 from django.utils.html import format_html
+from django.utils.safestring import mark_safe
 from django.views.decorators.csrf import csrf_protect
 
 import tracker.models.fields
 import tracker.models.tag
-from tracker import forms, models, search_filters, settings
+from tracker import forms, logutil, models, search_filters, settings
 
 from ..auth import send_registration_mail
 from . import inlines
@@ -31,7 +34,7 @@ from .filters import EventFilter, RunListFilter, RunParticipantFilter
 from .forms import StartRunForm, TestEmailForm
 from .util import CustomModelAdmin, EventArchivedMixin, RelatedUserMixin
 
-# need to override the default behavior for this because the `view_user` permission is too broad
+# need to override the default behavior for this because the `view_user` permission is too broad to grant to everybody
 
 
 class UserAutocompleteView(AutocompleteJsonView):
@@ -75,11 +78,13 @@ class EventAdmin(RelatedUserMixin, CustomModelAdmin):
                     'receiver_solicitation_text',
                     'receiver_logo',
                     'receiver_privacy_policy',
-                    'use_one_step_screening',
+                    'screening_mode',
                     'minimumdonation',
+                    'maximum_paypal_donation',
                     'auto_approve_threshold',
                     'datetime',
                     'timezone',
+                    'locale_code',
                     'draft',
                     'archived',
                     'allow_donations',
@@ -135,6 +140,17 @@ class EventAdmin(RelatedUserMixin, CustomModelAdmin):
         if not request.user.has_perm('tracker.can_search_for_user'):
             readonly_fields += ('prizecoordinator',)
         return readonly_fields
+
+    def get_form(self, request, obj=None, **kwargs):
+        form = super().get_form(request, obj, **kwargs)
+        if obj is None and (
+            username := getattr(settings, 'TRACKER_DEFAULT_PRIZE_COORDINATOR', None)
+        ):
+            User = get_user_model()
+            user = User.objects.filter(**{User.USERNAME_FIELD: username}).first()
+            if user:
+                form.base_fields['prizecoordinator'].initial = user.id
+        return form
 
     def get_search_results(self, request, queryset, search_term):
         parent_view = self.get_parent_view(request)
@@ -207,6 +223,7 @@ class EventAdmin(RelatedUserMixin, CustomModelAdmin):
     @staticmethod
     @permission_required('auth.change_user', raise_exception=True)
     def send_volunteer_emails_view(request, pk):
+        # TODO: only show this if using the standard auth model?
         event = models.Event.objects.filter(pk=pk, archived=False).first()
         if event is None:
             raise Http404
@@ -436,7 +453,7 @@ class EventAdmin(RelatedUserMixin, CustomModelAdmin):
             test_email_form = TestEmailForm()
 
         try:
-            storage = DefaultStorage()
+            storage = default_storage
             output = storage.save(f'testfile_{int(time.time())}', BytesIO(b'test file'))
             storage.open(output).read()
             assert storage.exists(output)
@@ -444,6 +461,21 @@ class EventAdmin(RelatedUserMixin, CustomModelAdmin):
             storage_works = True
         except Exception as e:
             storage_works = e
+
+        try:
+            prize_storage = storages['prizes']
+            try:
+                output = prize_storage.save(
+                    f'testfile_{int(time.time())}', BytesIO(b'test file')
+                )
+                prize_storage.open(output).read()
+                assert prize_storage.exists(output)
+                prize_storage.delete(output)
+                prize_storage_works = True
+            except Exception as e:
+                prize_storage_works = e
+        except InvalidStorageError:
+            prize_storage_works = 'default'
 
         return render(
             request,
@@ -454,14 +486,13 @@ class EventAdmin(RelatedUserMixin, CustomModelAdmin):
                 'ping_socket_url': ping_socket_url,
                 'celery_socket_url': celery_socket_url,
                 'storage_works': storage_works,
+                'prize_storage_works': prize_storage_works,
                 'TRACKER_HAS_CELERY': settings.TRACKER_HAS_CELERY,
             },
         )
 
     @staticmethod
-    def ui_view(request, ROOT_PATH=None, TRACKER_PATH=None, extra='', **kwargs):
-        ROOT_PATH = ROOT_PATH or reverse('admin:tracker_ui')
-        TRACKER_PATH = TRACKER_PATH or reverse('tracker:index_all')
+    def ui_view(request, extra='', **kwargs):
         if extra.startswith('v2'):
             template = 'ui/generated/processing.html'
         else:
@@ -475,12 +506,16 @@ class EventAdmin(RelatedUserMixin, CustomModelAdmin):
             {
                 'event': models.Event.objects.current(),
                 'events': models.Event.objects.all(),
-                'CONSTANTS': constants(request.user),
-                'ROOT_PATH': ROOT_PATH,
-                'TRACKER_PATH': TRACKER_PATH,
+                'CONSTANTS': {
+                    **constants(request.user),
+                    'ROOT_PATH': reverse('admin:tracker_ui'),
+                },
                 'app_name': 'AdminApp',
-                'form_errors': {},
-                'props': {},
+                'settings': {
+                    'TRACKER_SWEEPSTAKES_URL': settings.TRACKER_SWEEPSTAKES_URL,
+                    'TRACKER_LOGO': settings.TRACKER_LOGO,
+                    'TRACKER_CONTRIBUTORS_URL': settings.TRACKER_CONTRIBUTORS_URL,
+                },
             },
         )
 
@@ -521,6 +556,7 @@ class EventAdmin(RelatedUserMixin, CustomModelAdmin):
         donors = (
             tracker.models.DonorCache.objects.filter(event=event)
             .exclude(donor__visibility='ANON')
+            .exclude(donor=None)
             .select_related('donor')
             .iterator()
         )
@@ -703,7 +739,7 @@ class EventAdmin(RelatedUserMixin, CustomModelAdmin):
                     p.event.short,
                     p.name,
                     len(eligible),
-                    len([d for d in eligible if d['amount'] == p.minimumbid]),
+                    len([d for d, a in eligible.items() if a == p.minimumbid]),
                     p.start_draw_time(),
                     p.end_draw_time(),
                 ]
@@ -990,7 +1026,6 @@ class SpeedRunAdmin(EventArchivedMixin, CustomModelAdmin):
         'hosts_',
         'commentators_',
         'order',
-        'onsite',
         'start_time',
         'anchored',
         'run_time',
@@ -1010,7 +1045,7 @@ class SpeedRunAdmin(EventArchivedMixin, CustomModelAdmin):
                     'description',
                     'event',
                     'order',
-                    'starttime',
+                    'start_time',
                     'anchor_time',
                     'run_time',
                     'setup_time',
@@ -1028,7 +1063,7 @@ class SpeedRunAdmin(EventArchivedMixin, CustomModelAdmin):
         ),
         ('Bids', {'fields': ('bids',)}),
     ]
-    readonly_fields = ('starttime', 'bids')
+    readonly_fields = ('start_time', 'bids')
     actions = ['start_run']
     inlines = (inlines.VideoLinkInline,)
 
@@ -1063,7 +1098,16 @@ class SpeedRunAdmin(EventArchivedMixin, CustomModelAdmin):
 
     @admin.display(description='Start Time')
     def start_time(self, instance):
-        return instance.starttime if instance.order else None
+        if instance.order:
+            if instance.order > 1:
+                url = reverse('admin:start_run', args=(instance.id,))
+                return mark_safe(
+                    f'<a href="{url}">{display_for_value(instance.starttime, self.get_empty_value_display())}</a>'
+                )
+            else:
+                return instance.starttime
+        else:
+            return None
 
     @admin.display(description='Anchored', boolean=True)
     def anchored(self, instance):
@@ -1109,6 +1153,13 @@ class SpeedRunAdmin(EventArchivedMixin, CustomModelAdmin):
     @staticmethod
     @permission_required('tracker.change_speedrun')
     def start_run_view(request, run):
+        extra = {}
+        if '_changelist_filters' in request.GET:
+            extra['_changelist_filters'] = request.GET.get('_changelist_filters')
+        elif (referer := request.META.get('HTTP_REFERER', None)) and (
+            qs := urlparse(referer)[4]
+        ):
+            extra['_changelist_filters'] = qs
         run = models.SpeedRun.objects.filter(id=run, event__archived=False).first()
         if not run:
             raise Http404
@@ -1147,14 +1198,18 @@ class SpeedRunAdmin(EventArchivedMixin, CustomModelAdmin):
                 post_url = urlunparse(pieces)
             form.save()
             prev.refresh_from_db()
+            logutil.change(
+                request,
+                prev,
+                f'Set run time to {prev.run_time}. Set setup time to {prev.setup_time}.',
+            )
             messages.info(request, 'Previous run time set to %s' % prev.run_time)
             messages.info(request, 'Previous setup time set to %s' % prev.setup_time)
             run.refresh_from_db()
+            if run.anchor_time:
+                logutil.change(request, run, f'Set anchor time to {run.anchor_time}.')
             messages.info(request, 'Current start time is %s' % run.starttime)
             return HttpResponseRedirect(post_url)
-        extra = {}
-        if '_changelist_filters' in request.GET:
-            extra['_changelist_filters'] = request.GET.get('_changelist_filters')
         return render(
             request,
             'admin/tracker/generic_form.html',
@@ -1167,6 +1222,10 @@ class SpeedRunAdmin(EventArchivedMixin, CustomModelAdmin):
                         'Tracker',
                     ),
                     (reverse('admin:tracker_speedrun_changelist'), 'Speedruns'),
+                    (
+                        reverse('admin:tracker_speedrun_change', args=(run.id,)),
+                        run.name_with_category,
+                    ),
                     (None, 'Start Run'),
                 ),
                 'form': form,
@@ -1197,3 +1256,6 @@ class SpeedRunAdmin(EventArchivedMixin, CustomModelAdmin):
 class VideoLinkAdmin(EventArchivedMixin, CustomModelAdmin):
     autocomplete_fields = ('run',)
     event_child_fields = ('run',)
+
+    def get_event_filter_key(self):
+        return 'run__event'

@@ -73,6 +73,8 @@ jobs:
 
       - script: |
           python runtests.py --no-input --parallel 8
+        env:
+          TRACKER_DISABLE_TQDM: 1
         displayName: 'Run Django tests'
         retryCountOnTaskFailure: 3
 
@@ -114,6 +116,7 @@ jobs:
           python setup.py package
         displayName: 'Build Package'
         env:
+          BUILD_NUMBER: $(Build.BuildNumber)
           PACKAGE_NAME_SUFFIX: $(Build.SourceVersion)
 
       - task: TwineAuthenticate@1

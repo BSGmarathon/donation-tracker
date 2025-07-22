@@ -13,6 +13,7 @@ import {
   Interview,
   Milestone,
   Prize,
+  PrizeLifecycle,
   PrizeState,
   Run,
   Talent,
@@ -50,6 +51,10 @@ export interface BidChild
   options?: BidChild[];
 }
 
+export function compareBidChild(a: BidChild, b: BidChild) {
+  return b.total - a.total || a.name.localeCompare(b.name);
+}
+
 export interface FlatBid extends Omit<BidBase, 'event' | 'options' | 'repeat' | 'allowuseroptions'> {
   event?: number;
   repeat?: number | null;
@@ -59,6 +64,7 @@ export interface FlatBid extends Omit<BidBase, 'event' | 'options' | 'repeat' | 
 
 export interface TreeBid extends Omit<BidBase, 'event' | 'repeat' | 'allowuseroptions' | 'level' | 'parent'> {
   event?: number;
+  repeat?: number | null;
   allowuseroptions?: boolean;
   options?: BidChild[];
   chain_steps?: BidChain[];
@@ -170,6 +176,22 @@ export interface DonationGet {
   all?: '';
   all_bids?: '';
   time_gte?: string;
+}
+
+export type DonationPostBid = { amount: number } & ({ id: number } | { parent: number; name: string });
+
+export interface DonationPost {
+  event: number;
+  requested_alias: string; // blank for anonymous
+  requested_email: string; // blank if we should just use PayPal
+  email_optin: boolean;
+  amount: number;
+  comment: string;
+  bids: DonationPostBid[];
+  domain?: DonationDomain; // defaults to 'LOCAL'
+  // only with creation permission
+  donor_email?: string;
+  donor_id?: number;
 }
 
 export interface APIRun
@@ -290,6 +312,9 @@ export interface PrizeGet {
   name?: string;
   q?: string;
   run?: number;
+  // blank string means to return all lifecycles and include the field in the response, 'archived' is a meta-lifecycle
+  // supports multiple lookups for the standard values
+  lifecycle?: '' | 'archived' | PrizeLifecycle | PrizeLifecycle[];
 }
 
 export interface PrizePost {
@@ -333,6 +358,10 @@ export interface DonationCommentPatch {
 }
 
 export interface DonorGet {
+  totals?: string;
+  /**
+   * @deprecated use `totals` instead
+   */
   include_totals?: string;
 }
 

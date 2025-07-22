@@ -1,13 +1,14 @@
 import post_office.mail
 import post_office.models
 from django.contrib.auth.tokens import default_token_generator
+from django.contrib.sites.shortcuts import get_current_site
 from django.urls import reverse
 from django.utils.encoding import force_bytes
 from django.utils.http import urlsafe_base64_encode
 
 from tracker import settings
 
-from . import mailutil, viewutil
+from . import mailutil
 
 
 def default_registration_template_name():
@@ -149,7 +150,7 @@ def send_registration_mail(
     template = template or mailutil.get_email_template(
         default_registration_template_name(), default_registration_template()
     )
-    sender = sender or viewutil.get_default_email_from_user()
+    sender = sender or settings.DEFAULT_FROM_EMAIL
     extra_context = extra_context or {}
     confirmation_url = request.build_absolute_uri(
         reverse(
@@ -174,6 +175,7 @@ def send_registration_mail(
         context={
             **extra_context,
             'user': user,
+            'domain': get_current_site(request).domain,
             'confirmation_url': confirmation_url,
             'reset_url': reset_url,
             'password_reset_url': password_reset_url,

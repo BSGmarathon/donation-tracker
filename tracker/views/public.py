@@ -1,7 +1,7 @@
 import json
 
 import django.core.paginator as paginator
-from django.db.models import Avg, Count, FloatField, Max, Prefetch, Sum
+from django.db.models import Avg, FloatField, Max, Sum
 from django.db.models.functions import Cast, Coalesce
 from django.http import Http404, HttpResponse, HttpResponseRedirect
 from django.views.decorators.cache import cache_page
@@ -16,8 +16,6 @@ from tracker.models import (
     DonorCache,
     Milestone,
     Prize,
-    PrizeCategory,
-    PrizeWinner,
     SpeedRun,
 )
 
@@ -61,34 +59,27 @@ def eventlist(request):
 
 def index(request, event=None):
     event = viewutil.get_event(event)
-    eventParams = {}
+    filter_params = {}
 
     if event.id:
-        eventParams['event'] = event.id
-
-    donations = Donation.objects.completed().filter(
-        **eventParams,
-    )
-
-    if not settings.PAYPAL_TEST:
-        donations = donations.filter(testdonation=False)
-
-    agg = donations.aggregate(
-        total=Cast(Coalesce(Sum('amount'), 0), output_field=FloatField()),
-        count=Count('amount'),
-        max=Cast(Coalesce(Max('amount'), 0), output_field=FloatField()),
-        avg=Cast(Coalesce(Avg('amount'), 0), output_field=FloatField()),
-    )
-    agg['median'] = float(util.median(donations, 'amount'))
+        caches = DonorCache.objects.filter(donor=None, event=event)
+        filter_params['event'] = event
+    else:
+        caches = DonorCache.objects.filter(donor=None, event=None)
 
     count = {}
     if not event.draft:
         count.update(
             {
-                'runs': SpeedRun.objects.public().filter(**eventParams).count(),
-                'prizes': Prize.objects.public().filter(**eventParams).count(),
-                'bids': Bid.objects.public().filter(level=0, **eventParams).count(),
-                'milestones': Milestone.objects.public().filter(**eventParams).count(),
+                'runs': SpeedRun.objects.public().filter(**filter_params).count(),
+                'prizes': Prize.objects.public().filter(**filter_params).count(),
+                'bids': Bid.objects.public().filter(level=0, **filter_params).count(),
+                'milestones': Milestone.objects.public()
+                .filter(**filter_params)
+                .count(),
+                'donations': caches.aggregate(count=Coalesce(Sum('donation_count'), 0))[
+                    'count'
+                ],
             }
         )
 
@@ -111,7 +102,9 @@ def index(request, event=None):
         )
 
     return views_common.tracker_response(
-        request, 'tracker/index.html', {'agg': agg, 'count': count, 'event': event}
+        request,
+        'tracker/index.html',
+        {'caches': caches, 'count': count, 'event': event},
     )
 
 
@@ -145,6 +138,7 @@ def get_bid_info(bid, bids):
         'parent': bid.parent_name,
         'speedrun': bid.speedrun_name,
         'event': bid.event_name if not bid.speedrun_name else '',
+        'currency': bid.currency,
         'description': bid.description,
         'goal': bid.goal,
         'total': bid.total,
@@ -162,6 +156,7 @@ def get_bid_info(bid, bids):
             info['steps'] = [
                 get_bid_info(step, bids) for step in get_bid_steps(bid, bids)
             ]
+            info['total_steps'] = 1 + len(info['steps'])
     else:
         info['children'] = get_bid_children(bid, bids)
     return info
@@ -184,7 +179,12 @@ def bidindex(request, event=None):
             request, template='tracker/badobject.html', status=404
         )
 
-    bids = Bid.objects.public().filter(event=event).with_annotations()
+    bids = (
+        Bid.objects.public()
+        .filter(event=event)
+        .select_related('event')
+        .with_annotations()
+    )
 
     toplevel = [b for b in bids if b.parent_id is None]
     total = sum((b.total for b in toplevel), 0)
@@ -287,6 +287,9 @@ def milestoneindex(request, event=None):
 @cache_page(60)
 def donorindex(request, event=None):
     raise Http404
+
+    # FIXME this code has rotted while disabled because of other changes to DonorCache
+
     event = viewutil.get_event(event)
     orderdict = {
         'total': ('donation_total',),
@@ -404,20 +407,19 @@ def donationindex(request, event=None):
     except ValueError:
         order = -1
 
-    donations = Donation.objects.filter(transactionstate='COMPLETED')
+    donations = Donation.objects.completed()
 
     if event.id:
         donations = donations.filter(event=event)
-    donations = views_common.fixorder(donations, orderdict, sort, order)
+        caches = DonorCache.objects.filter(donor=None, event=event)
+    else:
+        caches = DonorCache.objects.filter(donor=None, event=None)
 
-    agg = donations.aggregate(
-        total=Sum('amount'),
-        count=Count('amount'),
-        max=Max('amount'),
-        avg=Avg('amount'),
+    donations = views_common.fixorder(donations, orderdict, sort, order)
+    donations = donations.select_related('donor', 'event').prefetch_related(
+        'donor__cache'
     )
-    agg['median'] = util.median(donations, 'amount')
-    donations = donations.select_related('donor').prefetch_related('donor__cache')
+
     pages = paginator.Paginator(donations, 50)
     # TODO: these should really be errors
     try:
@@ -436,7 +438,7 @@ def donationindex(request, event=None):
             'donations': donations,
             'pageinfo': pageinfo,
             'page': page,
-            'agg': agg,
+            'caches': caches,
             'sort': sort,
             'order': order,
             'event': event,
@@ -509,12 +511,13 @@ def run_detail(request, pk):
         run = (
             SpeedRun.objects.prefetch_related('runners', 'hosts', 'commentators')
             .exclude(order=None)
-            .filter(event__draft=True)
+            .filter(event__draft=False)
+            .select_related('event')
             .get(pk=pk)
         )
         event = run.event
         bids = Bid.objects.public().filter(speedrun=pk).with_annotations()
-        bids = [get_bid_info(bid, bids) for bid in bids.filter(level=0)]
+        bids = [get_bid_info(bid, bids) for bid in bids if bid.level == 0]
 
         return views_common.tracker_response(
             request,
@@ -551,9 +554,7 @@ def prizeindex(request, event=None):
     searchParams['event'] = event.id
 
     prizes = filters.run_model_query('prize', searchParams)
-    prizes = prizes.select_related('startrun', 'endrun', 'category').prefetch_related(
-        Prefetch('prizewinner_set', queryset=PrizeWinner.objects.claimed_or_pending())
-    )
+    prizes = prizes.select_related('startrun', 'endrun', 'category')
     return views_common.tracker_response(
         request,
         'tracker/prizeindex.html',
@@ -567,31 +568,23 @@ def prize_detail(request, pk):
         raise Http404
     try:
         prize = (
-            Prize.objects.prefetch_related(
-                Prefetch(
-                    'prizewinner_set', queryset=PrizeWinner.objects.claimed_or_pending()
-                )
-            )
-            .filter(event__draft=False)
+            Prize.objects.filter(event__draft=False)
+            .select_related('startrun', 'endrun')
             .get(pk=pk)
         )
         event = prize.event
         games = None
-        category = None
 
         if prize.startrun:
             games = SpeedRun.objects.filter(
-                starttime__gte=SpeedRun.objects.get(pk=prize.startrun.id).starttime,
-                endtime__lte=SpeedRun.objects.get(pk=prize.endrun.id).endtime,
+                order__gte=prize.startrun.order,
+                order__lte=prize.endrun.order,
             )
-
-        if prize.category:
-            category = PrizeCategory.objects.get(pk=prize.category.id)
 
         return views_common.tracker_response(
             request,
             'tracker/prize.html',
-            {'event': event, 'prize': prize, 'games': games, 'category': category},
+            {'event': event, 'prize': prize, 'games': games},
         )
     except Prize.DoesNotExist:
         return views_common.tracker_response(

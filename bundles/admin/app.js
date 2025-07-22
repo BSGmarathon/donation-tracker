@@ -32,6 +32,11 @@ function EventMenu(name) {
         <Spinner spinning={isLoading}>
           {name}
           <ul style={{ display: 'block' }}>
+            {name === 'Process Pending Bids' && (
+              <li>
+                <Link to="@all">All Events</Link>
+              </li>
+            )}
             {sortedEvents &&
               sortedEvents.map(e => (
                 <li key={e.id}>
@@ -65,6 +70,11 @@ function DropdownMenu({ name, path }) {
           overflowY: 'auto',
         }}>
         <ul style={{ display: 'block' }}>
+          {name === 'Process Pending Bids' && (
+            <li>
+              <Link to={`${path}/@all`}>All Events</Link>
+            </li>
+          )}
           {sortedEvents &&
             sortedEvents.map(e => (
               <li key={e.id}>
@@ -108,10 +118,11 @@ function App({ rootPath }) {
   useTrackerInit();
   const { isLoading } = useEventsQuery();
   const canViewBids = usePermission('tracker.view_bid');
+  const { ROOT_PATH } = useConstants();
 
   return (
     <Spinner spinning={isLoading}>
-      <BrowserRouter>
+      <BrowserRouter basename={ROOT_PATH}>
         <Routes>
           <Route path={rootPath}>
             <Route
