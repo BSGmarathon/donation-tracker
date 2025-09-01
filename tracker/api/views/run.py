@@ -157,7 +157,9 @@ class SpeedRunViewSet(
         try:
             with transaction.atomic():
                 # pessimistic, but this endpoint should not get hit very often, so it's probably ok
-                queryset.select_for_update()
+                # need to actually evaluate it, or it won't lock the rows
+                if not queryset.select_for_update().count():
+                    raise ValidationError('nonsense')
 
                 # - every run within the range will have its order field changed
                 # - if we cross an anchor boundary, every run between the new position and the next anchor
@@ -335,12 +337,16 @@ class SpeedRunViewSet(
                 interstitials = Interstitial.objects.filter(
                     anchor__in=changed
                 ).select_related('anchor')
+                interstitials.update(order=None)
                 for i in interstitials:
                     try:
-                        i.full_clean()
+                        i.full_clean(exclude=['order'])
                     except DjangoValidationError as exc:
                         raise DjangoValidationError({'interstitial': exc.messages})
-                    i.save()
+                # have to run it separately -after- we have ensured no other collisions
+                for i in interstitials:
+                    i.order = i.anchor.order
+                Interstitial.objects.bulk_update(interstitials, ['order'])
 
                 logutil.change(self.request, moving, ['order'])
         except DjangoValidationError as exc:
