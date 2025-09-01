@@ -78,7 +78,7 @@ interface DonationRowProps {
 }
 
 export default function ReadingDonationRow(props: DonationRowProps) {
-  const { data: event } = useEventFromRoute();
+  // const { data: event } = useEventFromRoute();
   const { donation, draggable, currentGroupId } = props;
 
   const readingTime = getEstimatedReadingTime(donation.comment);
@@ -129,7 +129,7 @@ export default function ReadingDonationRow(props: DonationRowProps) {
       renderActions={renderActions}
       onDrop={onDrop}
       canDrop={canDrop}
-      showBids={event?.screening_mode === 'host_only'}
+      showBids
     />
   );
 }
