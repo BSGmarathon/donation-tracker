@@ -13,7 +13,7 @@ from django.db.models import Prefetch
 from django.urls import reverse
 from timezone_field import TimeZoneField
 
-from tracker import compat, settings, util
+from tracker import settings, util
 from tracker.validators import max_100, nonzero, positive, validate_locale
 
 from .fields import TimestampField
@@ -635,7 +635,7 @@ class SpeedRun(models.Model):
                             'Next anchor in the order would occur before this one'
                         )
                     else:
-                        for c, n in compat.pairwise(
+                        for c, n in itertools.pairwise(
                             itertools.chain(
                                 [self],
                                 SpeedRun.objects.filter(
