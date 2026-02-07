@@ -1,5 +1,5 @@
 # base
-celery==5.6.0
+celery==5.6.2
 channels==4.3.2
 setuptools
 wheel
@@ -7,18 +7,17 @@ wheel
 django-ical==1.9.2
 django-paypal==1.1.2
 django-mptt==0.18.0
-django-post-office==3.10.1
+django-post-office==3.11.0
 django-timezone-field==7.2.1
 djangorestframework==3.16.1
-pre-commit==4.5.0
+pre-commit==4.5.1
 python-dateutil==2.8.2 ; python_version<"3.11"
 babel==2.17.0
 # only for testing
 daphne==4.2.1
-lxml==6.0.2 ; python_version<"3.10" # azure issue?
 msgpack==1.1.2
 responses~=0.25.8
-selenium==4.39.0
+selenium==4.40.0
 tblib==3.2.2
 tqdm==4.67.1
-unittest-xml-reporting==3.2.0
+unittest-xml-reporting==4.0.0
