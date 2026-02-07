@@ -167,12 +167,12 @@ function Internal({ event }: { event: Event }) {
       </Header>
       {event.charity_split < 100 ? (
         <Text size={Text.Sizes.SIZE_16}>
-          {event.charity_split}% of your donation goes to {event.receivername}, though transaction fees may apply. The
+          Excluding bank transaction fees, {event.charity_split}% of your donation goes to {event.receivername}. The
           remainder goes to supporting future events.
         </Text>
       ) : (
         <Text size={Text.Sizes.SIZE_16}>
-          100% of your donation goes directly to {event.receivername}, though transaction fees may apply.
+          Excluding bank transaction fees, 100% of your donation goes directly to {event.receivername}.
         </Text>
       )}
       <section className={styles.section}>
@@ -261,6 +261,8 @@ function Internal({ event }: { event: Event }) {
           value={donation.comment}
           label="Leave a Comment?"
           placeholder="Enter Comment Here"
+          meer
+          Marketing
           hint="Please refrain from offensive language or hurtful remarks. All donation comments are screened and will be removed from the website if deemed unacceptable."
           multiline
           onChange={updateComment}
